@@ -9,11 +9,12 @@ fi
 
 poetry version $1
 new_ver=$( poetry version | awk '{print $2;}' )
-sed -i 's/\(__version__ =\).*/\1 '${new_ver}'/'         xdyna/__init__.py
-sed -i 's/\(assert __version__ ==\).*/\1 '${new_ver}'/' tests/test_version.py
+sed -i "s/\(__version__ =\).*/\1 '"${new_ver}"'/"         xdyna/__init__.py
+sed -i "s/\(assert __version__ ==\).*/\1 '"${new_ver}"'/" tests/test_version.py
 git reset
 git add pyproject.toml xdyna/__init__.py tests/test_version.py
 git commit -m "Updated version number to v"${new_ver}"."
 git tag v${new_ver}
+git push origin v${new_ver}
 
 
