@@ -15,6 +15,6 @@ git reset
 git add pyproject.toml xdyna/__init__.py tests/test_version.py
 git commit -m "Updated version number to v"${new_ver}"."
 git tag v${new_ver}
-git push origin v${new_ver}
+git push origin --tags
 
 
