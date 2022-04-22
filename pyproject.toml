@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "xdyna"
-version = "0.0.1"
+version = "0.0.2"
 description = "Xsuite dynamics package"
 repository = "https://github.com/xsuite/xdyna"
 authors = ["Frederik F. Van der Veken <frederik.van.der.veken@cern.ch>"]
