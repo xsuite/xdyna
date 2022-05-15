@@ -4,6 +4,12 @@ import json
 
 from .protectfile import ProtectFile
 
+
+# The DAMeta class stores the info of the DA
+# The difference with the DA class is that the latter is a single instance, potentially
+# of many in parallel.
+# Is this needed?
+
 # Developers: if new metadata is added, the following steps have to be implemented:
 #    - description in docstring
 #    - initialisation above and in __init__
@@ -12,10 +18,11 @@ from .protectfile import ProtectFile
 #    - added to _cols
 #    - potential initialisation in DA
 
-# TODO: missing particle selection ...
+# TODO: missing particle selection ...   =>  ?
+# TODO: line file
 
-def regenerate_da_metadata(filename, *, da_type=None, da_dim=None, emitx=None, emity=None, turns=0, energy=0,
-                           nseeds=0, pairs_shift=0, pairs_shift_var=None, s_start=None, submissions={}):
+def regenerate_da_metadata(filename, *, da_type=None, da_dim=None, emitx=None, emity=None, min_turns=None, max_turns=None,
+                           energy=0, r_max=None, nseeds=0, pairs_shift=0, pairs_shift_var=None, s_start=None, submissions={}):
     """Function to manually regenerate the *.meta.json file, in case it got corrupted or deleted.
     
     """
@@ -27,7 +34,9 @@ def regenerate_da_metadata(filename, *, da_type=None, da_dim=None, emitx=None, e
         meta._da_dim = da_dim
         meta._emitx = emitx
         meta._emity = emity
-        meta._turns = turns
+        meta._r_max = r_max
+        meta._min_turns = min_turns
+        meta._max_turns = max_turns
         meta._energy = energy
         meta._nseeds = nseeds
         meta._pairs_shift = pairs_shift
@@ -67,7 +76,12 @@ class _DAMetaData:
     emity : float
         The vertical emittance used to calculated the beam size which
         is used to calculate the initial conditions.
-    turns : int
+    r_max : float
+        The maximum radius to generate initial particles. This is set
+        automatically by the generation functions.
+    min_turns : int
+        The minimum number of turns to use for DA recognition.
+    max_turns : int
         The maximum number of turns to track.
     energy : float
         The energy of the beam.
@@ -86,8 +100,6 @@ class _DAMetaData:
         Path to the metadata file (*.meta.json)
     line_file : pathlib.Path
         Path to the xtrack line file (*.line.json)
-    six_path : pathlib.Path
-        Path to the sixtrack input (six_path/(seed)/fort.*)
     surv_file : pathlib.Path
         Path to the survival file (*.surv.parquet)
     da_file : pathlib.Path
@@ -109,11 +121,12 @@ class _DAMetaData:
     # _auto_cols are calculated automatically and do not need to be read in
     # _optional_cols will not be stored to the json if their value is None
     
-    _cols = ['name','path','da_type','da_dim','emitx','emity','turns','energy','nseeds','pairs_shift','pairs_shift_var',\
-             's_start','meta_file','line_file','six_path','surv_file','da_file','da_evol_file','submissions']
-    _path_cols = ['path','meta_file','line_file','six_path','surv_file','da_file','da_evol_file']
+    _cols = ['name','path','da_type','da_dim','emitx','emity','min_turns','max_turns','energy','nseeds','pairs_shift',\
+             'pairs_shift_var','s_start','meta_file','line_file','surv_file','da_file','da_evol_file',\
+             'r_max','submissions']
+    _path_cols = ['path','meta_file','line_file','surv_file','da_file','da_evol_file']
     _auto_cols = ['name','path','meta_file','surv_file','da_file','da_evol_file']
-    _optional_cols = ['six_path','line_file']
+    _optional_cols = ['r_max','line_file']
     # used to specify the accepted DA types
     _da_types=['radial', 'grid', 'monte_carlo', 'free']
 
@@ -121,7 +134,9 @@ class _DAMetaData:
     _da_dim_default          = None
     _emitx_default           = None
     _emity_default           = None
-    _turns_default           = 0
+    _r_max_default           = None
+    _max_turns_default       = None
+    _min_turns_default       = None
     _energy_default          = 0
     _nseeds_default          = 0
     _pairs_shift_default     = 0
@@ -139,14 +154,15 @@ class _DAMetaData:
         self._da_dim          = self._da_dim_default
         self._emitx           = self._emitx_default
         self._emity           = self._emity_default
-        self._turns           = self._turns_default
+        self._r_max           = self._r_max_default
+        self._max_turns       = self._max_turns_default
+        self._min_turns       = self._min_turns_default
         self._energy          = self._energy_default
         self._nseeds          = self._nseeds_default
         self._pairs_shift     = self._pairs_shift_default
         self._pairs_shift_var = self._pairs_shift_var_default
         self._s_start         = self._s_start_default
         self._submissions     = self._submissions_default
-        self._six_path        = None
         self._line_file        = None
         if not skip_file_generation:
             if self.meta_file.exists():
@@ -185,17 +201,6 @@ class _DAMetaData:
     def line_file(self, line_file):
         line_file = Path(line_file).resolve()
         self._set_property('line_file', line_file)
-
-    @property
-    def six_path(self):
-        return self._six_path
-
-    @six_path.setter
-    def six_path(self, six_path):
-        six_path = Path(six_path).resolve()
-        if not six_path.exists():
-            raise ValueError(f"The path {six_path} does not exist!")
-        self._set_property('six_path', six_path)
 
     @property
     def surv_file(self):
@@ -254,14 +259,28 @@ class _DAMetaData:
         self._set_property('emity', emity)
 
     @property
-    def turns(self):
-        return self._turns
+    def r_max(self):
+        return self._r_max
 
-    @turns.setter
-    def turns(self, turns):
-        if not isinstance(turns, numbers.Number):
-            raise ValueError(f"The number of turns should be a number!")
-        self._set_property('turns', round(turns))
+    @property
+    def min_turns(self):
+        return self._min_turns
+
+    @min_turns.setter
+    def min_turns(self, min_turns):
+        if not isinstance(min_turns, numbers.Number):
+            raise ValueError(f"The value of min_turns should be a number!")
+        self._set_property('min_turns', round(min_turns))
+        
+    @property
+    def max_turns(self):
+        return self._max_turns
+
+    @max_turns.setter
+    def max_turns(self, max_turns):
+        if not isinstance(max_turns, numbers.Number):
+            raise ValueError(f"The value of max_turns should be a number!")
+        self._set_property('max_turns', round(max_turns))
 
     @property
     def energy(self):
@@ -322,10 +341,10 @@ class _DAMetaData:
 
     # Allowed on parallel process
     def new_submission_id(self):
-        with ProtectFile(self.meta_file, 'r+', wait=0.005) as pf:
+        with ProtectFile(self.meta_file, 'r+', wait=0.001) as pf:
             meta = json.load(pf)
             new_id = len(meta['submissions'].keys())
-            meta['submissions'][new_id] = None
+            meta['submissions'][new_id] = {}
             pf.truncate(0)  # Delete file contents (to avoid appending)
             pf.seek(0)      # Move file pointer to start of file
             json.dump(meta, pf, indent=2, sort_keys=False)
@@ -334,9 +353,9 @@ class _DAMetaData:
 
     # Allowed on parallel process
     def update_submissions(self, submission_id, val):
-        with ProtectFile(self.meta_file, 'r+', wait=0.005) as pf:
+        with ProtectFile(self.meta_file, 'r+', wait=0.001) as pf:
             meta = json.load(pf)
-            meta['submissions'].update({submission_id: val})
+            meta['submissions'].update({str(submission_id): val})
             pf.truncate(0)  # Delete file contents (to avoid appending)
             pf.seek(0)      # Move file pointer to start of file
             json.dump(meta, pf, indent=2, sort_keys=False)

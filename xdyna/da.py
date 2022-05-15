@@ -1,26 +1,25 @@
 from scipy import interpolate, integrate
-from scipy.constants import c as clight
+# from scipy.constants import c as clight
 from math import floor
 import numpy as np
+from numpy.random import default_rng
 import pandas as pd
 
-from pathlib import Path
-import json
-import os, subprocess
+# from pathlib import Path
+# import json
+# import os, subprocess
 import datetime
+import time
 
-
-import xobjects as xo
-import xtrack as xt
+# import xobjects as xo
+# import xtrack as xt
 import xpart as xp
-import sixtracktools as st
     
 from .protectfile import ProtectFile
 from .da_meta import _DAMetaData
+from .ml import MLBorder
+from .geometry import _bleed, distance_to_polygon_2D
 
-
-# def load_SixTrack_colldb(filename, *, emit):
-#     return CollDB(emit=emit, sixtrack_file=filename)
 
 
 class DA:
@@ -37,37 +36,44 @@ class DA:
 #                 'nturns', 'paired_to', 'submitted'
 #              ]
 
-    def __init__(self, filename, *, turns=None, nseeds=None, emittance=None, energy=None):
+    def __init__(self, filename, *, min_turns=None, max_turns=None, nseeds=0, emittance=None, energy=None,
+                 load_files=False, memory_threshold=1e9):
         # Initialise metadata
         self._meta = _DAMetaData(filename=filename)
-        if turns is not None:
-            self.meta.turns = turns
-        if nseeds is not None:
-            self.meta.nseeds = nseeds
+        self.meta.nseeds = nseeds
+        if min_turns is not None:
+            self.meta.min_turns = min_turns
+        if max_turns is not None:
+            self.meta.max_turns = max_turns
         if emittance is not None:
-            self.meta.emittance = emittance
+            self.emittance = emittance
         if energy is not None:
             self.meta.energy = energy
+        self.memory_threshold = memory_threshold
 
         self._surv = None
         self._da = None
         self._da_evol = None
         self._active_job = -1
         self._active_job_log = {}
+        if load_files:
+            if self.meta.surv_file.exists():
+                with ProtectFile(self.meta.surv_file, 'rb') as pf:
+                    self._surv = pd.read_parquet(pf)
+            if self.meta.da_file.exists():
+                with ProtectFile(self.meta.da_file, 'rb') as pf:
+                    self._da = pd.read_parquet(pf)
+            if self.meta.da_evol_file.exists():
+                with ProtectFile(self.meta.da_evol_file, 'rb') as pf:
+                    self._da_evol = pd.read_parquet(pf)
 
 
     # =================================================================
     # ================ Generation of intial conditions ================
     # =================================================================
 
-    # Not allowed on parallel process
-    def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
-                                px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
-        """Generate the initial conditions in a 2D polar grid.
-        
-        traditionally this is .000000001
-        """
+    
+    def _prepare_generation(self, emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         # Does survival already exist?
         if self._surv is not None:
             print("Warning: Initial conditions already exist! No generation done.")
@@ -93,48 +99,7 @@ class DA:
         elif pairs_shift_var is not None:
             raise ValueError("Need to set magnitude of shift between pairs with pairs_shift!")
 
-        # Make the grid in r
-        if r_step is None and r_num is None:
-            raise ValueError(f"Specify at least 'r_step' or 'r_num'.")
-        elif r_step is not None and r_num is not None:
-            raise ValueError(f"Use only one of 'r_step' and 'r_num', not both.")
-        elif r_step is not None:
-            r_num = floor( (r_max-r_min) / r_step ) + 1
-            r_max = r_min + (r_num-1) * r_step
-        r = np.linspace(r_min, r_max, r_num )
-        # Make the grid in angles
-        if ang_min is None and ang_max is None:
-            ang_step = 90. / (angles+1)
-            ang = np.linspace(ang_step, 90-ang_step, angles )
-        else:
-            ang_min = 0 if ang_min is None else ang_min
-            ang_max = 90 if ang_max is None else ang_max
-            ang_step = (ang_max-ang_min) / (angles+1)
-            ang = np.linspace(ang_min, ang_max, angles )
-        # Make all combinations
-        if self.meta.nseeds is None:
-            r, ang = np.array(np.meshgrid(r, ang)).reshape(2,-1)
-        else:
-            self.meta.nseeds = nseeds
-            seeds = np.arange(1,nseeds+1)
-            ang, seeds, r = np.array(np.meshgrid(ang, seeds, r)).reshape(3,-1)
-        # Get the normalised coordinates
-        x = r*np.cos(ang*np.pi/180)
-        y = r*np.sin(ang*np.pi/180)
-        # Make dataframe
-        self._surv = pd.DataFrame()
-        if self.meta.nseeds is not None:
-            self._surv['seed'] = seeds.astype(int)
-        self._surv['ang_xy'] = ang
-        self._surv['r_xy'] = r
-        self._surv['nturns'] = -1
-        self._surv['x_norm_in'] = x
-        self._surv['y_norm_in'] = y
-        self._surv['px_norm_in'] = px_norm
-        self._surv['py_norm_in'] = py_norm
-        self._surv['zeta_in'] = zeta
-        self._surv['delta_in'] = delta
-        self._surv['submitted'] = False
+    def _create_pairs(self):
         # Create pairs if requested
         if self.meta.pairs_shift != 0:
             coord = self.meta.pairs_shift_var
@@ -162,10 +127,278 @@ class DA:
             # Join existing and new dataframe
             df.set_index(df.index + len(df.index), inplace=True)
             self._surv = pd.concat([self._surv, df])
+
+
+
+    # Not allowed on parallel process
+    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
+                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """Generate the initial conditions in a 2D random grid.
+        
+        traditionally this is .000000001
+        """
+        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+        # Make the data
+        rng = default_rng()
+        if self.meta.nseeds > 0:
+            r = rng.uniform(low=0, high=r_max**2, size=num_part*self.meta.nseeds)
+            r = np.sqrt(r)
+            th = rng.uniform(low=0, high=2*np.pi, size=num_part*self.meta.nseeds)
+            x = r*np.cos(th)
+            y = r*np.sin(th)
+            seeds = np.repeat(np.arange(1,self.meta.nseeds+1), num_part)
+        else:
+            r = rng.uniform(low=0, high=r_max**2, size=num_part)
+            r = np.sqrt(r)
+            th = rng.uniform(low=0, high=2*np.pi, size=num_part)
+            x = r*np.cos(th)
+            y = r*np.sin(th)
+
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['nturns'] = -1
+        self._surv['px_norm_in'] = px_norm
+        self._surv['py_norm_in'] = py_norm
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
+        with ProtectFile(self.meta.surv_file, 'x+b') as pf:
+            self._surv.to_parquet(pf, index=True)
+        self.meta.da_type = 'monte_carlo'
+        self.meta.da_dim = 2
+        self.meta._r_max = r_max
+
+
+
+    # Not allowed on parallel process
+    def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
+                                px_norm=0, py_norm=0, zeta=0, delta=0.00027,
+                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """Generate the initial conditions in a 2D polar grid.
+        
+        traditionally this is .000000001
+        """
+        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+
+        # Make the grid in r
+        if r_step is None and r_num is None:
+            raise ValueError(f"Specify at least 'r_step' or 'r_num'.")
+        elif r_step is not None and r_num is not None:
+            raise ValueError(f"Use only one of 'r_step' and 'r_num', not both.")
+        elif r_step is not None:
+            r_num = floor( (r_max-r_min) / r_step ) + 1
+            r_max = r_min + (r_num-1) * r_step
+        r = np.linspace(r_min, r_max, r_num )
+        # Make the grid in angles
+        if ang_min is None and ang_max is None:
+            ang_step = 90. / (angles+1)
+            ang = np.linspace(ang_step, 90-ang_step, angles )
+        else:
+            ang_min = 0 if ang_min is None else ang_min
+            ang_max = 90 if ang_max is None else ang_max
+            ang_step = (ang_max-ang_min) / (angles+1)
+            ang = np.linspace(ang_min, ang_max, angles )
+        # Make all combinations
+        if self.meta.nseeds > 0:
+            self.meta.nseeds = nseeds
+            seeds = np.arange(1,nseeds+1)
+            ang, seeds, r = np.array(np.meshgrid(ang, seeds, r)).reshape(3,-1)
+        else:
+            r, ang = np.array(np.meshgrid(r, ang)).reshape(2,-1)
+        # Get the normalised coordinates
+        x = r*np.cos(ang*np.pi/180)
+        y = r*np.sin(ang*np.pi/180)
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        self._surv['ang_xy'] = ang
+        self._surv['r_xy'] = r
+        self._surv['nturns'] = -1
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['px_norm_in'] = px_norm
+        self._surv['py_norm_in'] = py_norm
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
         with ProtectFile(self.meta.surv_file, 'x+b') as pf:
             self._surv.to_parquet(pf, index=True)
         self.meta.da_type = 'radial'
         self.meta.da_dim = 2
+
+
+
+    # Not allowed on parallel process
+    def add_random_initial(self, *, num_part=5000, min_turns=None):
+
+        # TODO: make compatible with seeds and with pairs
+        if self.meta.nseeds > 0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError
+
+        # TODO: erase already calculated DA values
+
+        # Set minimum turns
+        if min_turns is None:
+            if self.meta.min_turns is None:
+                self.meta.min_turns = 20
+        else:
+            if self.meta.min_turns is not None and self.meta.min_turns != turns:
+                # TODO: This should only be checked if we already re-sampled.
+                # There is no harm by changing min_turns after the initial run
+                print(f"Warning: 'min_turns' can be set only once (and is already set to {self.meta.min_turns}). "
+                      + "Ignored the new value.")
+
+        # Get existing results
+        if self.surv_data is None:
+            raise ValueError("No survival data found!")
+        data = self.surv_data
+        px_norm = self._surv['px_norm_in']
+        py_norm = self._surv['py_norm_in']
+        zeta = self._surv['zeta_in']
+        delta = self._surv['delta_in']
+
+        # Get minimum and maximum borders
+        prev = time.process_time()
+        print(f"Getting minimum border (at Nmin={self.meta.min_turns} turns)... ", end='')
+        ML_min = MLBorder(data.x, data.y, data.nturns, at_turn=self.meta.min_turns, memory_threshold=self.memory_threshold)
+        ML_min.fit(50)
+        ML_min.evaluate(0.5)
+        min_border_x, min_border_y = ML_min.border
+        print(f"done (in {round(time.process_time()-prev,2)} seconds).")
+
+        prev = time.process_time()
+        print(f"Getting maximum border (at Nmax={self.meta.max_turns} turns)... ", end='')
+        ML_max = MLBorder(data.x, data.y, data.nturns, at_turn=self.meta.max_turns, memory_threshold=self.memory_threshold)
+        ML_max.fit(50)
+        ML_max.evaluate(0.5)
+        max_border_x, max_border_y = ML_max.border
+        print(f"done (in {round(time.process_time()-prev,2)} seconds).")
+
+        print(f"Generating samples... ", end='')
+        # First we create a 'pool' of samples that contains 100 times as many particles as wished.
+        # This is to get a reliable distribution to select from later.
+        # We make this pool by sampling a uniform ring, from the inner circle of the max_border (with bleed)
+        # until the outer circle of the min_border (with bleed). Then we veto particles if they're not
+        # within the borders (with bleed)
+        rng = default_rng()
+        _, r_max, bleed_min_val = _bleed(min_border_x, min_border_y, margin=0.1)
+        r_min, _, bleed_max_val = _bleed(max_border_x, max_border_y, margin=0.1)
+
+        r_min -= bleed_max_val
+        r_max += bleed_min_val
+        r_max = min(r_max, self.meta.r_max)
+
+        n_pool = num_part * 100
+        x_pool = np.array([])
+        y_pool = np.array([])
+        d_pool = np.array([])
+
+        # Go in chunks of maximum ram during calculation of distances
+        n_samples = int(self.memory_threshold / 25 / max(len(min_border_x), len(max_border_x)))
+
+        while n_pool > 0:
+            n_samples = min(n_samples, int(2.5*n_pool))
+            r = rng.uniform(low=r_min**2, high=r_max**2, size=n_samples)
+            r = np.sqrt(r)
+            th = rng.uniform(low=0, high=2*np.pi, size=n_samples)
+            x = r*np.cos(th)
+            y = r*np.sin(th)
+            distance_to_min = distance_to_polygon_2D(x, y, min_border_x, min_border_y)
+            distance_to_max = distance_to_polygon_2D(x, y, max_border_x, max_border_y)
+
+            # We only sample points in between min_border and max_border, but also allow
+            # for a bit of 'bleed' over the border.
+            between   = (distance_to_min <= 0) & (distance_to_max > 0)
+            bleed_min = (distance_to_min > 0) & (distance_to_min < bleed_min_val)
+            bleed_max = (distance_to_max <= 0) & (distance_to_max > -bleed_max_val)
+
+            x_clean = x[bleed_max | bleed_min | between]
+            y_clean = y[bleed_max | bleed_min | between]
+
+            # Rescale the distances to adapt to the probabilities later:
+            distance = distance_to_max.copy()
+            # Those that bleeded over the maximum border are rescaled between 0 (on the border) and -1/2 (maximum bleed)
+            distance[bleed_max] /= bleed_max_val*2
+            # Those in between are rescaled to the distance between the two borders: 0 (on the max border), 1 (on the min border)
+            distance[between] /= distance_to_max[between] - distance_to_min[between]
+            # Those that bleeded over the minimum border are rescaled between 1 (on the border) and 3/2 (maximum bleed)
+            distance[bleed_min] = distance_to_min[bleed_min]/bleed_min_val/2 + 1
+
+            d_clean = distance[bleed_max | bleed_min | between]
+
+            n_pool -= len(x_clean)
+            if n_pool < 0:
+                x_pool = np.concatenate([x_pool, x_clean[:n_pool]])
+                y_pool = np.concatenate([y_pool, y_clean[:n_pool]])
+                d_pool = np.concatenate([d_pool, d_clean[:n_pool]])
+            else:
+                x_pool = np.concatenate([x_pool, x_clean])
+                y_pool = np.concatenate([y_pool, y_clean])
+                d_pool = np.concatenate([d_pool, d_clean])
+
+        # The pool is generated, now we sample!
+        # As a probability distribution, we use a gaussian scaled by a square root, shifted 1/2 to the left
+        prob = np.sqrt(d_pool+0.5)*np.exp(-(d_pool+0.5)**2)
+        prob /= prob.sum()
+        ids = rng.choice(np.arange(len(x_pool)), size=num_part, replace=False, p=prob, shuffle=False)
+        x_new = x_pool[ids]
+        y_new = y_pool[ids]
+        print(f"done (in {round(time.process_time()-prev,2)} seconds).")
+
+        # Make new dataframe
+        df_new = pd.DataFrame()
+#         if self.meta.nseeds > 0:
+#             self._surv['seed'] = seeds.astype(int)
+        df_new['x_norm_in'] = x_new
+        df_new['y_norm_in'] = y_new
+        df_new['nturns'] = -1
+        df_new['px_norm_in'] = px_norm
+        df_new['py_norm_in'] = py_norm
+        df_new['zeta_in'] = zeta
+        df_new['delta_in'] = delta
+        df_new['x_out'] = -1
+        df_new['y_out'] = -1
+        df_new['px_out'] = -1
+        df_new['py_out'] = -1
+        df_new['zeta_out'] = -1
+        df_new['delta_out'] = -1
+        df_new['s_out'] = -1
+        df_new['state'] = 1
+        df_new['submitted'] = False
+        df_new['finished'] = False
+#         self._create_pairs()   # Needs to only act on non-finished particles ...        
+        self._surv = pd.concat([
+                            self._surv,
+                            df_new
+                    ])
+
+        with ProtectFile(self.meta.surv_file, 'wb') as pf:
+            self._surv.to_parquet(pf, index=True)
 
 
 
@@ -174,217 +407,64 @@ class DA:
     # =================================================================
     
     # Allowed on parallel process
-    def xtrack_job(self, npart, turns=None, tracker=None):
-        if tracker is not None:
-            self._tracker = tracker
-
-    # =================================================================
-    # =================== Sixtrack tracking jobs ======================
-    # =================================================================
-            
-    # Not allowed on parallel process
-    # TODO: allow parallel for dedicated MAD-X process
-    def create_line_from_sixtrack(self, sixtrack_input_folder=None):
-        """Create a line from sixtrack input, to be used in parallel tracking"""
-        # Checks
-        # TODO: check for other variables, such as particle type and RF
-        if self.meta.energy == _DAMetaData._energy_default:
-            raise ValueError("Energy not set! Do this before creating the line.")
-        # Set the SixTrack input folder if not done yet
-        self._set_sixtrack_folder(sixtrack_input_folder)
-        # List of seeds
-        if self.meta.nseeds > 0:
-            seeds = list(range(1, self.meta.nseeds+1))
-            self.meta.line_file = Path(self.meta.six_path, f'{self.meta.name}.line_*.json')
-        else:
-            seeds = [''] # Small hack to avoid having to rewrite following loop
-            self.meta.line_file = Path(self.meta.six_path, f'{self.meta.name}.line.json')
-        # Loop over seeds
-        for seed in seeds:
-            seed = str(seed)
-            seedpath = Path(self.meta.six_path, seed).resolve()
-            # If individual fort.3 are missing, make links
-            if not Path(seedpath, 'fort.3').exists():
-                if Path(self.meta.six_path, 'fort.3').exists():
-                    Path(seedpath, 'fort.3').symlink_to(Path(self.meta.six_path, 'fort.3'))
-                else:
-                    raise Exception("No fort.3 found!")
-            # Filename for line
-            if seed == '':
-                linefile = self.meta.line_file
-            else:
-                linefile = Path(self.meta.line_file.as_posix().replace('*', seed))
-            if linefile.exists():
-                continue
-            # Generate line
-            with ProtectFile(linefile, 'x') as pf:
-                print(f"Calculating line{'' if seed=='' else ' for seed ' + seed}.")
-                line = xt.Line.from_sixinput(st.SixInput(seedpath))
-                # TODO: no hardcoding of particle selection as proton
-                line.particle_ref = xp.Particles(mass0=xp.PROTON_MASS_EV, p0c=self.meta.energy)
-                # TODO: no hardcoding of RF
-                line['acsca.d5l4.b1'].voltage = 16e6
-                line['acsca.d5l4.b1'].frequency = 400e6
-                json.dump(line.to_dict(), pf, cls=xo.JEncoder)
-
-    def _set_sixtrack_folder(self, sixtrack_input_folder=None):
-        # Check that folder with SixTrack input files exists
-        if sixtrack_input_folder is None:
-            if self.meta.six_path is None:
-                self.meta.six_path = Path('SixTrack_Files').resolve()
-        else:
-            self.meta.six_path = Path(sixtrack_input_folder).resolve()
-        if not self.meta.six_path.exists():
-            raise ValueError(f"SixTrack input folder not found (expected {self.meta.six_path.as_posix()})! Cannot track.")
-
-
-    # Allowed on parallel process
-    def sixtrack_job(self, *, npart, turns=None, sixtrack_executable=None, sixtrack_input_folder=None,\
-                     use_xtrack_for_initial=True):
-        """Run a sixtrack job of 'npart' particles for 'nturns'"""
-        self._set_sixtrack_folder(sixtrack_input_folder)
-        # Check that executable exists and can run
-        if sixtrack_executable is None:
-            sixtrack_executable = Path(self.meta.six_path,'sixtrack').resolve()
-        else:
-            sixtrack_executable = Path(sixtrack_executable).resolve()
-        if not sixtrack_executable.exists():
-            raise ValueError(f"SixTrack executable not found (expected {sixtrack_executable.as_posix()})! Cannot track.")
-        if not os.access(sixtrack_executable, os.X_OK):
-            raise ValueError("SixTrack executable is not executable! Cannot track.")
+    def track_job(self, *,  npart, tracker, turns=None):
+        if tracker is None:
+            raise ValueError()
             
         # Create a job: get job ID and start logging
-        self._create_job(npart, turns)
+        part_ids = self._create_job(npart, turns)
         job_id = str(self._active_job)
-        self._update_job_log({
-                'engine':     'sixtrack',
-                'executable': sixtrack_executable.as_posix(),
-                'input':      self.meta.six_path.as_posix()
-        })
         
-        # Define job script file and output file
-        jobs     = Path(self.meta.six_path, f'jobs_{self.meta.name}').resolve()
-        jobs.mkdir(exist_ok=True)
-        job      = Path(jobs, f'job_{job_id}.sh').resolve()
-        job_out  = Path(jobs, f'job_{job_id}.out')
-        # Define fort files
-        # TODO: a lot is still hardcoded in the fort.3:
-        #       npart, turns, pmass, energy, ...
-        fort3    = Path(self.meta.six_path, 'fort.3' ).resolve()
-        if not fort3.exists():
-            self._fail_job(f"Did not find fort.3 (expected {fort3.as_posix()})! Cannot track.")
-        seed     = '' if self._active_job_log['seed']==0 else str(self._active_job_log['seed'])
-        seedpath = Path(self.meta.six_path, seed).resolve()
-        fort2    = Path(seedpath, f'fort.2').resolve()
-        fort8    = Path(seedpath, f'fort.8').resolve()
-        fort16   = Path(seedpath, f'fort.16').resolve()
-        if not fort2.exists():
-            self._fail_job(f"Did not find fort.2 (expected {fort2.as_posix()})! Cannot track.")
-        if not fort8.exists():
-            self._warn_job(f"Did not find fort.2 (expected {fort8.as_posix()}).")
-        if not fort16.exists():
-            self._warn_job(f"Did not find fort.16 (expected {fort16.as_posix()}).")
-        fort10  = Path(jobs, f'fort.10_job{job_id}').resolve()
-        # Create SixTrack input
-        initial = Path(jobs, f'initial_job{job_id}.dat').resolve()
-        self._create_sixtrack_initial(initial, seed, use_xtrack=use_xtrack_for_initial)
-        # Create bash script
-        script = '#!/bin/bash\n'
-        script += 'temp=$( mktemp -d )\n'
-        script += 'cd ${temp}\n'
-        script += f'ln -fns {sixtrack_executable.as_posix()} sixtrack\n'
-        script += f'ln -fns {fort2.as_posix()} fort.2\n'
-        script += f'ln -fns {fort3.as_posix()} fort.3\n'
-        script += f'ln -fns {fort8.as_posix()} fort.8\n'
-        script += f'ln -fns {fort16.as_posix()} fort.16\n'
-        script += f'ln -fns {initial.as_posix()} initial.dat\n'
-        script += f'echo "Job {job_id}, seed {seed}" >> {job_out.as_posix()}\n'
-        script += f'./sixtrack >> {job_out.as_posix()} 2>&1\n'
-        script += f'mv fort.10 {fort10.as_posix()}\n'
-        script += 'rm -r ${temp}\n'
-        jobf = open(job, "w")
-        jobf.write(script)
-        jobf.close()
-        os.chmod(job, 0o777)
-        print("Running sixtrack")
-        result = subprocess.run(job, capture_output=True, text=True)
-        if result.returncode != 0:
-            self._update_job_log({'finished_time':  datetime.datetime.now().isoformat()})
-            self._fail_job(self, result.stderr)
-        else:
-            self._update_job_log({
-                'finished_time': datetime.datetime.now().isoformat(),
-                'status':        'Finished',
-                'output':        result.stdout
-            })
-            #DO FORT.10
+        # Create initial particles
+        x_norm  = self._surv['x_norm_in'].to_numpy()
+        y_norm  = self._surv['y_norm_in'].to_numpy()
+        px_norm = self._surv['px_norm_in'].to_numpy()
+        py_norm = self._surv['py_norm_in'].to_numpy()
+        zeta    = self._surv['zeta_in'].to_numpy()
+        delta   = self._surv['delta_in'].to_numpy()
+        part = xp.build_particles(
+                          tracker=tracker,
+                          x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
+                          scale_with_transverse_norm_emitt=self.emittance
+                         )
+        # Track
+        self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.')
+        tracker.track(particles=part, num_turns=self.this_turns)
+        self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.')
 
+        # Store results
+        part.reshuffle()
+        x_out     = part.x
+        y_out     = part.y
+        survturns = part.at_turn
+        px_out    = part.px
+        py_out    = part.py
+        zeta_out  = part.zeta
+        delta_out = part.delta
+        s_out     = part.s
+        state     = part.state
 
-    
+        with ProtectFile(self.meta.surv_file, 'r+b', wait=0.02) as pf:
+            full_surv = pd.read_parquet(pf)
+            full_surv.loc[part_ids, 'finished'] = True
+            full_surv.loc[part_ids, 'x_out'] = x_out
+            full_surv.loc[part_ids, 'y_out'] = y_out
+            full_surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
+            full_surv.loc[part_ids, 'px_out'] = px_out
+            full_surv.loc[part_ids, 'py_out'] = py_out
+            full_surv.loc[part_ids, 'zeta_out'] = zeta_out
+            full_surv.loc[part_ids, 'delta_out'] = delta_out
+            full_surv.loc[part_ids, 's_out'] = s_out
+            full_surv.loc[part_ids, 'state'] = state
+            pf.truncate(0)  # Delete file contents (to avoid appending)
+            pf.seek(0)      # Move file pointer to start of file
+            full_surv.to_parquet(pf, index=True)
+        self._surv = full_surv
 
-    # Note: SixTrack initial.dat is with respect to the closed orbit when using TRAC,
-    #       but in the lab frame when using SIMU
-    def _create_sixtrack_initial(self, filename, seed, use_xtrack=True):
-        if use_xtrack:
-            if filename.exists():
-                print("Initial conditions already exist for this job.")
-                return
-            print("Generating initial conditions for this job.")
-            # Filename for line
-            if seed == '':
-                linefile = self.meta.line_file
-            else:
-                linefile = Path(self.meta.line_file.as_posix().replace('*', seed))
-            # Check that line exists if needed:
-            if not linefile.exists():
-                raise Exception("Using xtrack for generation of initial conditions, but line not yet created!\n" \
-                            + "Do this first (on a non-parallel job).")
-            with ProtectFile(linefile, 'r') as pf:
-                line = xt.Line.from_dict(json.load(pf))
-            with ProtectFile(filename, 'x') as pf:
-                tracker = line.build_tracker()
-                # TODO: start at different s / element
-                part = xp.build_particles(tracker=tracker,
-                                 # TODO: build_particles does not work with pandas df
-                                 #       because the latter has a get() attribute (I think)
-                                 x_norm  = np.array(self._surv['x_norm_in']),
-                                 px_norm = np.array(self._surv['px_norm_in']),
-                                 y_norm  = np.array(self._surv['y_norm_in']),
-                                 py_norm = np.array(self._surv['py_norm_in']),
-                                 zeta    = np.array(self._surv['zeta_in']),
-                                 delta   = np.array(self._surv['delta_in']),
-                                 scale_with_transverse_norm_emitt=(self.meta.emitx, self.meta.emitx)
-                             )
-                part_xp = np.array(part.px*part.rpp)
-                part_yp = np.array(part.py*part.rpp)
-                charge = [ round(q) for q in part.charge_ratio*part.q0 ]
-                mass_ratio = [ round(m) for m in part.charge_ratio/part.chi ]
-                mass = np.array(part.mass0*part.charge_ratio/part.chi)
-                part_p = np.array((1+part.delta)*part.p0c)
-                # sigma = - beta0*c*dt
-                part_dt = - np.array(part.zeta/part.rvv/part.beta0) / clight
-                data = pd.DataFrame({
-                    'particle ID':   list(range(1, len(self._surv.index)+1)),
-                    'parent ID':     list(range(1, len(self._surv.index)+1)),
-                    'weight':        1,      # unused
-                    'x':             np.array(part.x),
-                    'y':             np.array(part.y),
-                    'z':             1,      # unused
-                    'xp':            part_xp,
-                    'yp':            part_yp,
-                    'zp':            1,      # unused
-                    'mass number':   mass_ratio,        # This is not correct! If the parent particle
-                                                        # is an ion, mass_ratio will not approximate
-                                                        # the mass number. Works for protons though
-                    'atomic number': charge,
-                    'mass [GeV/c2]': mass*1e-9,
-                    'p [GeV/c2]':    part_p*1e-9,
-                    'delta t':       part_dt
-                })
-                data.to_csv(pf, sep=' ', header=False, index=False)
-        else:
-            # TODO: give normalised coordinates to SixTrack
-            raise NotImplementedError
+        self._update_job_log({
+            'finished_time': datetime.datetime.now().isoformat(),
+            'status': 'Finished'
+        })
 
 
 
@@ -395,18 +475,23 @@ class DA:
     # Allowed on parallel process
     def _create_job(self, npart, turns):
         if turns is not None:
-            if turns > self.meta.turns:
-                if self.meta.turns != _DAMetaData._turns_default:
-                    print("Warning: This job tracks more turns than foreseen!")
-                self.meta.turns = turns
-        if self.meta.turns == _DAMetaData._turns_default:
+            if self.meta.max_turns is None:
+                self.meta.max_turns = turns
+            elif turns < self.meta.max_turns:
+                print("Warning: The argument 'turns' was set a value lower than DA.max_turns! "
+                      + "Ignored the former.")
+            elif turns > self.meta.max_turns:
+#                 if self.meta.max_turns != _DAMetaData._turns_default:
+#                 self.this_turns = turns
+                raise NotImplementedError
+        self.this_turns = self.meta.max_turns
+        if self.this_turns == _DAMetaData._max_turns_default:
             raise ValueError("Number of tracking turns not set! Cannot track.")
         # Get job ID
         self._active_job = self.meta.new_submission_id()
         with ProtectFile(self.meta.surv_file, 'r+b', wait=0.02) as pf:
             # Get the first npart particle IDs that are not yet submitted
-            # TODO: this can probably be optimised by only reading in first
-            #       npart lines; no need to read in full file?
+            # TODO: this can probably be optimised by only reading last column
             self._surv = pd.read_parquet(pf)
             mask = self._surv['submitted'] == False
             this_part_ids = self._surv[mask].index[:npart]
@@ -419,7 +504,13 @@ class DA:
                 this_part_ids = df.loc[mask].index
             else:
                 seed = 0
-            # Flag them as submitted, before releasing the file again
+            # Quit the job if no particles need to be submitted
+            if len(this_part_ids) == 0:
+                print("No more particles to submit! Exiting...")
+                # TODO: this doesn't work!
+                self.meta.update_submissions(self._active_job, {'status': 'No submission needed.'})
+                exit()
+            # Otherwise, flag the particles as submitted, before releasing the file again
             self._surv.loc[this_part_ids, 'submitted'] = True
             pf.truncate(0)  # Delete file contents (to avoid appending)
             pf.seek(0)      # Move file pointer to start of file
@@ -431,12 +522,13 @@ class DA:
                 'submission_time': datetime.datetime.now().isoformat(),
                 'finished_time':   0,
                 'status':          'Running',
-                'tracking_turns':  self.meta.turns,
+                'tracking_turns':  self.this_turns,
                 'particle_ids':    '[' + ', '.join([str(pid) for pid in this_part_ids]) + ']',
                 'seed':            int(seed),
                 'warnings':        [],
-                'output':          ''
+                'output':          [],
         }
+        return this_part_ids
 
 
     # Allowed on parallel process
@@ -445,14 +537,19 @@ class DA:
         self.meta.update_submissions(self._active_job, self._active_job_log)
 
     # Allowed on parallel process
+    def _append_job_log(self, key, update):
+        self._active_job_log[key].append(update)
+        self.meta.update_submissions(self._active_job, self._active_job_log)
+
+    # Allowed on parallel process
     def _fail_job(self, failtext):
-        self._active_job_log.update({'status': 'Failed: ' + failtext})
+        self._active_job_log['status'] = 'Failed: ' + failtext
         self.meta.update_submissions(self._active_job, self._active_job_log)
         raise Exception(failtext)
 
     # Allowed on parallel process
     def _warn_job(self, warntext):
-        self._active_job_log.update({'warnings': self._active_job_log['warnings'] + warntext})
+        self._active_job_log['warnings'].append(warntext)
         self.meta.update_submissions(self._active_job, self._active_job_log)
         print(warntext)
 
@@ -469,7 +566,7 @@ class DA:
             pass
         elif da_type == 'grid':
             pass
-        elif da_type in ['radial', 'free']:
+        elif da_type in ['monte_carlo', 'free']:
             pass # ML
 
     # =================================================================
@@ -570,7 +667,7 @@ class DA:
             self.meta.emitx = emit
             self.meta.emity = emit
         # Recalculate initial conditions if set
-        if self._surv is not None and oldemittance is not None \
+        if hasattr(self,'_surv') and self._surv is not None and oldemittance is not None \
         and self.emittance != oldemittance and update_surv:
             print("Updating emittance")
             corr_x = np.sqrt( oldemittance[0] / self.meta.emitx )
@@ -587,13 +684,6 @@ class DA:
                 pf.truncate(0)  # Delete file contents (to avoid appending)
                 pf.seek(0)      # Move file pointer to start of file
                 self._surv.to_parquet(pf, index=True)
-
-    @property
-    def energy(self):
-        return self.meta.energy
-#     def create_sixtrack_input
-    
-#     def create_xtrack_input
  
     def convert_to_radial(self):
         # impossible; only to add dimensions or something like that
@@ -653,39 +743,6 @@ def get_da_evo_radial(files):
     data = pd.concat([ pd.read_csv(file) for file in files ])
     return _calculate_radial_evo(_get_raw_da_radial(data))
     
-
-
-def _get_raw_da_sixdesk(data):
-    angles = np.unique(data.angle)
-    seeds = np.unique(data.seed)
-    ampcol = 'amp'
-    da = {}
-    data['turns'] = data[['sturns1']] #,'sturns2']].min(axis=1)
-    for seed in seeds:
-        da[seed] = {}
-        for angle in angles:
-            datasort = data[(data.angle==angle) & (data.seed==seed)].sort_values(ampcol)
-            # Cut out islands from evolution (i.e. force non-monotonously descending)
-            datasort['turns_no_islands'] = descend.accumulate(datasort.turns.astype(object))
-            # Keep the values around the places where the number of turns changes
-            mask = (datasort.turns_no_islands.diff() < 0 ) | (datasort.turns_no_islands.shift(-1).diff() < 0)
-            mask.iloc[-1] = True  # Add the last amplitude step (needed for interpolation later)
-            da[seed][angle] = np.array((
-                                datasort[mask][ampcol].values,datasort[mask].turns_no_islands.values
-                            ), dtype=float)
-    return da
-
-def get_da_sixdesk(files):
-    data = pd.concat([ pd.read_csv(file) for file in files ])
-    return {
-        seed: np.array([ [ang, vals[0,0]] for ang, vals in da.items() ])
-        for seed, da in _get_raw_da_sixdesk(data).items()
-    }
-
-def get_da_evo_sixdesk(files):
-    data = pd.concat([ pd.read_csv(file) for file in files ])
-    return { seed: _calculate_radial_evo(da) for seed,da in _get_raw_da_sixdesk(data).items() }
-
 
 
 
