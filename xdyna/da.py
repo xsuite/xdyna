@@ -11,7 +11,7 @@ import pandas as pd
 import datetime
 import time
 
-# import xobjects as xo
+import xobjects as xo
 # import xtrack as xt
 import xpart as xp
     
@@ -277,10 +277,11 @@ class DA:
         if self.surv_data is None:
             raise ValueError("No survival data found!")
         data = self.surv_data
-        px_norm = self._surv['px_norm_in']
-        py_norm = self._surv['py_norm_in']
-        zeta = self._surv['zeta_in']
-        delta = self._surv['delta_in']
+        # TODO: check that all px_norm etc are the same
+        px_norm = np.unique(self._surv['px_norm_in'])[0]
+        py_norm = np.unique(self._surv['py_norm_in'])[0]
+        zeta = np.unique(self._surv['zeta_in'])[0]
+        delta = np.unique(self._surv['delta_in'])[0]
 
         # Get minimum and maximum borders
         prev = time.process_time()
@@ -395,7 +396,7 @@ class DA:
         self._surv = pd.concat([
                             self._surv,
                             df_new
-                    ])
+                    ], ignore_index=True)
 
         with ProtectFile(self.meta.surv_file, 'wb') as pf:
             self._surv.to_parquet(pf, index=True)
@@ -405,16 +406,19 @@ class DA:
     # =================================================================
     # ==================== Xtrack tracking jobs =======================
     # =================================================================
-    
+
+    # TODO: if job has failed, it remains on submitted=True and finished=False so it won't resubmit.
+    # How to change this?
+
     # Allowed on parallel process
-    def track_job(self, *,  npart, tracker, turns=None):
+    def track_job(self, *,  npart, tracker, turns=None, resubmit_unfinished=False):
         if tracker is None:
             raise ValueError()
             
         # Create a job: get job ID and start logging
-        part_ids = self._create_job(npart, turns)
+        part_ids = self._create_job(npart, turns, resubmit_unfinished)
         job_id = str(self._active_job)
-        
+
         # Create initial particles
         x_norm  = self._surv['x_norm_in'].to_numpy()
         y_norm  = self._surv['y_norm_in'].to_numpy()
@@ -422,7 +426,9 @@ class DA:
         py_norm = self._surv['py_norm_in'].to_numpy()
         zeta    = self._surv['zeta_in'].to_numpy()
         delta   = self._surv['delta_in'].to_numpy()
-        part = xp.build_particles(
+
+        context=tracker._buffer.context
+        part = xp.build_particles(_context=context,
                           tracker=tracker,
                           x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
                           scale_with_transverse_norm_emitt=self.emittance
@@ -430,19 +436,21 @@ class DA:
         # Track
         self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.')
         tracker.track(particles=part, num_turns=self.this_turns)
+        context.synchronize()
         self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.')
 
         # Store results
-        part.reshuffle()
-        x_out     = part.x
-        y_out     = part.y
-        survturns = part.at_turn
-        px_out    = part.px
-        py_out    = part.py
-        zeta_out  = part.zeta
-        delta_out = part.delta
-        s_out     = part.s
-        state     = part.state
+        part_id   = context.nparray_from_context_array(part.particle_id)
+        sort      = np.argsort(part_id)
+        x_out     = context.nparray_from_context_array(part.x)[sort]
+        y_out     = context.nparray_from_context_array(part.y)[sort]
+        survturns = context.nparray_from_context_array(part.at_turn)[sort]
+        px_out    = context.nparray_from_context_array(part.px)[sort]
+        py_out    = context.nparray_from_context_array(part.py)[sort]
+        zeta_out  = context.nparray_from_context_array(part.zeta)[sort]
+        delta_out = context.nparray_from_context_array(part.delta)[sort]
+        s_out     = context.nparray_from_context_array(part.s)[sort]
+        state     = context.nparray_from_context_array(part.state)[sort]
 
         with ProtectFile(self.meta.surv_file, 'r+b', wait=0.02) as pf:
             full_surv = pd.read_parquet(pf)
@@ -473,7 +481,7 @@ class DA:
     # =================================================================
 
     # Allowed on parallel process
-    def _create_job(self, npart, turns):
+    def _create_job(self, npart, turns, resubmit_unfinished=False):
         if turns is not None:
             if self.meta.max_turns is None:
                 self.meta.max_turns = turns
@@ -493,7 +501,10 @@ class DA:
             # Get the first npart particle IDs that are not yet submitted
             # TODO: this can probably be optimised by only reading last column
             self._surv = pd.read_parquet(pf)
-            mask = self._surv['submitted'] == False
+            if resubmit_unfinished:
+                mask = self._surv['finished'] == False
+            else:
+                mask = self._surv['submitted'] == False
             this_part_ids = self._surv[mask].index[:npart]
             # If there are seeds, only take jobs from one seed
             if self.meta.nseeds > 0:
