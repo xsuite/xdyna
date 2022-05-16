@@ -300,6 +300,8 @@ class DA:
         max_border_x, max_border_y = ML_max.border
         print(f"done (in {round(time.process_time()-prev,2)} seconds).")
 
+        # TODO: catch when border tells us that not enough samples are available and larger r or larger Nmin is needed
+
         print(f"Generating samples... ", end='')
         # First we create a 'pool' of samples that contains 100 times as many particles as wished.
         # This is to get a reliable distribution to select from later.
@@ -501,10 +503,12 @@ class DA:
             # Get the first npart particle IDs that are not yet submitted
             # TODO: this can probably be optimised by only reading last column
             self._surv = pd.read_parquet(pf)
-            if resubmit_unfinished:
-                mask = self._surv['finished'] == False
-            else:
-                mask = self._surv['submitted'] == False
+            # TODO: this doesn't work as multiple jobs will do the same particles..
+#             if resubmit_unfinished:
+#                 mask = self._surv['finished'] == False
+#             else:
+#                 mask = self._surv['submitted'] == False
+            mask = self._surv['submitted'] == False
             this_part_ids = self._surv[mask].index[:npart]
             # If there are seeds, only take jobs from one seed
             if self.meta.nseeds > 0:

@@ -5,9 +5,17 @@ import scipy as sp
 from time import process_time
 
 # pip install scikit-learn-intelex
-from sklearnex import patch_sklearn #, unpatch_sklearn
-patch_sklearn()
+# try:
+#     from sklearnex import patch_sklearn #, unpatch_sklearn
+#     patch_sklearn()
+# except ImportError:
+#     pass
 
+# try:
+#     # Rapids is scikit-learn on gpu's
+#     # download via conda; see https://rapids.ai/start.html#get-rapids for info
+#     from cuml.svm import SVC
+# except ImportError:
 from sklearn.svm import SVC
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.pipeline import make_pipeline
