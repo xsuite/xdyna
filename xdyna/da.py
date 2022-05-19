@@ -401,7 +401,7 @@ class DA:
                     ], ignore_index=True)
 
         with ProtectFile(self.meta.surv_file, 'wb') as pf:
-            self._surv.to_parquet(pf, index=True)
+            self._surv.to_parquet(pf, index=True, engine="pyarrow")
 
 
 

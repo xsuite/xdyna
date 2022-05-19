@@ -262,6 +262,14 @@ class _DAMetaData:
     def r_max(self):
         return self._r_max
 
+    @r_max.setter
+    def r_max(self, r_max):
+        if not isinstance(r_max, numbers.Number):
+            raise ValueError(f"The property r_max should be a number!")
+        if r_max <= 0:
+            raise ValueError(f"The property r_max has to be larger than zero!")
+        self._set_property('r_max', r_max)
+
     @property
     def min_turns(self):
         return self._min_turns
