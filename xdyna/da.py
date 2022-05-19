@@ -180,7 +180,7 @@ class DA:
             self._surv.to_parquet(pf, index=True)
         self.meta.da_type = 'monte_carlo'
         self.meta.da_dim = 2
-        self.meta._r_max = r_max
+        self.meta.r_max = r_max
 
 
 
@@ -250,7 +250,7 @@ class DA:
             self._surv.to_parquet(pf, index=True)
         self.meta.da_type = 'radial'
         self.meta.da_dim = 2
-
+        self.meta.r_max = r_max
 
 
     # Not allowed on parallel process
