@@ -14,10 +14,9 @@ import time
 import xobjects as xo
 # import xtrack as xt
 import xpart as xp
-    
+
 from .protectfile import ProtectFile
 from .da_meta import _DAMetaData
-from .ml import MLBorder
 from .geometry import _bleed, distance_to_polygon_2D
 
 
@@ -72,7 +71,6 @@ class DA:
     # ================ Generation of intial conditions ================
     # =================================================================
 
-    
     def _prepare_generation(self, emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         # Does survival already exist?
         if self._surv is not None:
@@ -134,7 +132,7 @@ class DA:
     def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
-        
+
         traditionally this is .000000001
         """
         self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
@@ -189,7 +187,7 @@ class DA:
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D polar grid.
-        
+
         traditionally this is .000000001
         """
         self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
@@ -255,6 +253,7 @@ class DA:
 
     # Not allowed on parallel process
     def add_random_initial(self, *, num_part=5000, min_turns=None):
+        from .ml import MLBorder
 
         # TODO: make compatible with seeds and with pairs
         if self.meta.nseeds > 0 or self.meta.pairs_shift != 0:
