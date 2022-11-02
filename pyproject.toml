@@ -2,16 +2,18 @@
 name = "xdyna"
 version = "0.0.2"
 description = "Xsuite dynamics package"
+homepage = "https://github.com/xsuite/xdyna"
 repository = "https://github.com/xsuite/xdyna"
-authors = ["Frederik F. Van der Veken <frederik.van.der.veken@cern.ch>"]
+authors = ["Frederik F. Van der Veken <frederik@cern.ch>"]
+readme = "README.md"
+license = "Apache 2.0"
+include = [ "LICENSE", "NOTICE" ]
 
 [tool.poetry.dependencies]
-python = ">=3.8,<3.11" # The upper bound is required by scipy
+python = ">=3.8"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
-jupyter = "^1.0.0"
-ipykernel = "^6.13.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.8"]  # Needed for pip install -e
