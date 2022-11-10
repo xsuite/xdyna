@@ -27,10 +27,24 @@ def get_hash(filename, size=128):
             h.update(mv[:n])
     return h.hexdigest()
 
+def get_fstat(filename):
+    stats = pathlib.Path(filename).stat()
+    return {
+                'n_sequence_fields': stats.n_sequence_fields,
+                'n_unnamed_fields':  stats.n_unnamed_fields,
+                'st_mode':           stats.st_mode,
+                'st_ino':            stats.st_ino,
+                'st_dev':            stats.st_dev,
+                'st_uid':            stats.st_uid,
+                'st_gid':            stats.st_gid,
+                'st_size':           stats.st_size,
+                'st_mtime_ns':       stats.st_mtime_ns,
+                'st_ctime_ns':       stats.st_ctime_ns,
+            }
 
 class ProtectFile:
     """A wrapper around a file pointer, protecting it with a lockfile and backups.
-    
+
     Use
     ---
     It is meant to be used inside a context, where the entering and leaving of a
@@ -71,7 +85,7 @@ class ProtectFile:
         will keep the backup file even after destroying the ProtectFile object. Not
         used when a ProtectFile object is instantiated in read-only mode ('r' or
         'rb'), unless 'backup_if_readonly'=True.
-    
+
     Examples
     --------
     Reading in a file (while making sure it is not written to by another process):
@@ -110,10 +124,10 @@ class ProtectFile:
     >>>     pf.seek(0)              # Move file pointer to start of file
     >>>     data.to_parquet(pf, index=True)
     """
-    
+
     def __init__(self, *args, **kwargs):
         """A ProtectFile object, to be used only in a context.
-        
+
         Parameters
         ---------
         wait : int, default 1
@@ -130,11 +144,11 @@ class ProtectFile:
         check_hash : bool, default True
             Whether or not to verify by hash that the move of the temporary file to
             the original file succeeded.
-        
+
         Additionally, the following parameters are inherited from open():
             'file', 'mode', 'buffering', 'encoding', 'errors', 'newline', 'closefd', 'opener'
         """
-        
+
         argnames_open = ['file', 'mode', 'buffering', 'encoding', 'errors', 'newline', 'closefd', 'opener']
         arg = dict(zip(argnames_open, args))
         arg.update(kwargs)
@@ -160,7 +174,7 @@ class ProtectFile:
         # Try to make lockfile, wait if unsuccesful
         while True:
             try:
-                print(f"init: open {self.lockfile}")
+                #print(f"init: open {self.lockfile}")
                 self._flock = io.open(self.lockfile, 'x')
                 break
             except (IOError, OSError, FileExistsError):
@@ -191,24 +205,24 @@ class ProtectFile:
             self._do_backup = False
         if self._do_backup and self._exists:
             self._backup = pathlib.Path(file.parent, file.name + '.backup').resolve()
-            print(f"init: cp {self.file=} to {self.backupfile=}")
+            #print(f"init: cp {self.file=} to {self.backupfile=}")
             shutil.copy2(self.file, self.backupfile)
         else:
             self._backup = None
 
         # Store stats (to check if file got corrupted later)
         if self._exists:
-            self._fstat = self.file.stat()
+            self._fstat = get_fstat(self.file)
 
         # Choose file pointer:
         # Temporary if writing, or existing file if read-only
         if not self._readonly:
             if self._exists:
-                print(f"init: cp {self.file=} to {self.tempfile=}")
+                #print(f"init: cp {self.file=} to {self.tempfile=}")
                 shutil.copy2(self.file, self.tempfile)
-            arg['file'] = self.tempfile        
+            arg['file'] = self.tempfile
         self._fd = io.open(**arg)
-        
+
         # Store object in class dict for cleanup in case of sysexit
         protected_open[self.file] = self
 
@@ -227,7 +241,7 @@ class ProtectFile:
         # TODO: verify that checking file stats is 1) enough, and 2) not
         #       potentially problematic on certain file systems (i.e. if the
         #       system would periodically access the file, this would fail)
-        if self._exists and (self.file.stat() != self._fstat):
+        if self._exists and get_fstat(self.file) != self._fstat:
             print(f"Error: File {self.file} changed during lock!")
             # If corrupted, restore from backup
             # and move result of calculation (i.e. tempfile) to the parent folder
@@ -246,7 +260,7 @@ class ProtectFile:
         if not self._readonly:
             if destination is None:
                 # Move temporary file to original file
-                print(f"mv_temp: cp {self.tempfile=} to {self.file=}")
+                #print(f"mv_temp: cp {self.tempfile=} to {self.file=}")
                 shutil.copy2(self.tempfile, self.file)
                 # Check if copy succeeded
                 if self._check_hash and get_hash(self.tempfile) != get_hash(self.file):
@@ -254,16 +268,16 @@ class ProtectFile:
                           + "but hashes do not match!")
                     self.restore()
             else:
-                print(f"mv_temp: cp {self.tempfile=} to {destination=}")
+                #print(f"mv_temp: cp {self.tempfile=} to {destination=}")
                 shutil.copy2(self.tempfile, destination)
-            print(f"mv_temp: unlink {self.tempfile=}")
+            #print(f"mv_temp: unlink {self.tempfile=}")
             self.tempfile.unlink()
 
 
     def restore(self):
         """Restore the original file from backup and save calculation results"""
         if self._do_backup:
-            print(f"restore: rename {self.backupfile} into {self.file}")
+            #print(f"restore: rename {self.backupfile} into {self.file}")
             self.backupfile.rename(self.file)
             print('Restored file to previous state.')
         if not self._readonly:
@@ -284,12 +298,12 @@ class ProtectFile:
         if hasattr(self,'_do_backup') and hasattr(self,'_backup') and \
                 hasattr(self.backupfile,'is_file') and hasattr(self,'_keep_backup') and \
                 self._do_backup and self.backupfile.is_file() and not self._keep_backup:
-            print(f"release: unlink {self.backupfile}")
+            #print(f"release: unlink {self.backupfile}")
             self.backupfile.unlink()
         if hasattr(self,'_flock') and hasattr(self._flock,'closed') and not self._flock.closed:
             self._flock.close()
         if hasattr(self,'_lock') and hasattr(self.lockfile,'is_file') and self.lockfile.is_file():
-            print(f"release: unlink {self.lockfile}")
+            #print(f"release: unlink {self.lockfile}")
             self.lockfile.unlink()
         if pop:
             protected_open.pop(self._file, 0)

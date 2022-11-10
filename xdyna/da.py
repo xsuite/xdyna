@@ -21,6 +21,15 @@ from .geometry import _bleed, distance_to_polygon_2D
 
 
 
+
+
+# TODO: Function to generate DA object from meta file
+#       def generate_from_file(filename):
+#           DAMetaData(name = child, path= parent)    check that file ends in .meta.json etc
+
+
+
+
 class DA:
     # The real coordinates have to be generated on the machine that will track them.
     # the absolute truth is the sigma; if this translates to slightly different coordinates

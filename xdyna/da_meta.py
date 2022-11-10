@@ -10,39 +10,27 @@ from .protectfile import ProtectFile
 # of many in parallel.
 # Is this needed?
 
-# Developers: if new metadata is added, the following steps have to be implemented:
+# Developers: if a new metadata field is added, the following steps have to be implemented:
 #    - description in docstring
-#    - initialisation above and in __init__
+#    - give default in DAMetaData._defaults
 #    - @property setter and getter
-#    - initialisation in regenerate_da_metadata()
-#    - added to _cols
+#    - added to _fields
 #    - potential initialisation in DA
 
 # TODO: missing particle selection ...   =>  ?
-# TODO: line file
+# TODO: do not use optional fields!?
 
-def regenerate_da_metadata(filename, *, da_type=None, da_dim=None, emitx=None, emity=None, min_turns=None, max_turns=None,
-                           energy=0, r_max=None, nseeds=0, pairs_shift=0, pairs_shift_var=None, s_start=None, submissions={}):
+def regenerate_meta_file(name, **kwargs):
     """Function to manually regenerate the *.meta.json file, in case it got corrupted or deleted.
     
     """
-    meta = _DAMetaData(filename, skip_file_generation=True)
+    meta = _DAMetaData(name, use_files=False)
     if meta.meta_file.exists():
         print("Warning: metadata file already exists! Not regenerated.")
     else:
-        meta._da_type = da_type
-        meta._da_dim = da_dim
-        meta._emitx = emitx
-        meta._emity = emity
-        meta._r_max = r_max
-        meta._min_turns = min_turns
-        meta._max_turns = max_turns
-        meta._energy = energy
-        meta._nseeds = nseeds
-        meta._pairs_shift = pairs_shift
-        meta._pairs_shift_var = pairs_shift_var
-        meta._s_start = s_start
-        meta._submissions = submissions
+        # Initialise fields by kwargs
+        for field in self._defaults:
+            setattr(meta, '_' + field, kwargs.get(field, self._defaults[field]) )
         meta._store()
         return meta
 
@@ -100,6 +88,12 @@ class _DAMetaData:
         Path to the metadata file (*.meta.json)
     line_file : pathlib.Path
         Path to the xtrack line file (*.line.json)
+    db_extension : str
+        Type of file to use for the survival DataFrames. Possible extensions are:
+        parquet     : the Apache database format (need pyarrow installed).
+        csv         : the CSV file format. Not yet supported.
+        db          : the SQLite database format. Not yet supported.
+        hdfs        : the HDFS database format. Not yet supported.
     surv_file : pathlib.Path
         Path to the survival file (*.surv.parquet)
     da_file : pathlib.Path
@@ -115,67 +109,62 @@ class _DAMetaData:
     # Class Attributes
     # ----------------
     #
-    # _cols is (only) used to define the order of fields in the json
-    # _path_cols is used to list those that require a special treatment:
+    # _fields is (only) used to define the order of fields in the json
+    # _path_fields is used to list those that require a special treatment:
     #      They need to have a .to_posix() call before storing in the json
-    # _auto_cols are calculated automatically and do not need to be read in
-    # _optional_cols will not be stored to the json if their value is None
+    # _auto_fields are calculated automatically and do not need to be read in
+#    # _optional_fields will not be stored to the json if their value is None
     
-    _cols = ['name','path','da_type','da_dim','emitx','emity','min_turns','max_turns','energy','nseeds','pairs_shift',\
-             'pairs_shift_var','s_start','meta_file','line_file','surv_file','da_file','da_evol_file',\
-             'r_max','submissions']
-    _path_cols = ['path','meta_file','line_file','surv_file','da_file','da_evol_file']
-    _auto_cols = ['name','path','meta_file','surv_file','da_file','da_evol_file']
-    _optional_cols = ['r_max','line_file']
+    _fields = ['name','path','da_type','da_dim','emitx','emity','min_turns','max_turns','energy','nseeds','r_max',\
+               'pairs_shift','pairs_shift_var','s_start','meta_file','line_file','db_extension','surv_file','da_file',\
+               'da_evol_file','submissions']
+    _path_fields = ['path','meta_file','line_file','surv_file','da_file','da_evol_file']
+    _auto_fields = ['name','path','meta_file','surv_file','da_file','da_evol_file']
+#     _optional_fields = []  # these default to None
     # used to specify the accepted DA types
     _da_types=['radial', 'grid', 'monte_carlo', 'free']
+    # used to specify the accepted file formats for the survival dataframe
+    _db_extensions=['parquet', 'db', 'hdfs']
 
-    _da_type_default         = None
-    _da_dim_default          = None
-    _emitx_default           = None
-    _emity_default           = None
-    _r_max_default           = None
-    _max_turns_default       = None
-    _min_turns_default       = None
-    _energy_default          = 0
-    _nseeds_default          = 0
-    _pairs_shift_default     = 0
-    _pairs_shift_var_default = None
-    _s_start_default         = 0
-    _submissions_default     = {}
+    _defaults = {
+        'da_type':         None,
+        'da_dim':          None,
+        'emitx':           None,
+        'emity':           None,
+        'min_turns':       None,
+        'max_turns':       None,
+        'r_max':           None,
+        'energy':          0,
+        'nseeds':          0,
+        'pairs_shift':     0,
+        'pairs_shift_var': None,
+        's_start':         0,
+        'submissions':     {},
+        'line_file':       None,
+        'db_extension':    'parquet'
+    } #| { field: None for field in _optional_fields}
 
 
-    def __init__(self, *, filename, skip_file_generation=False):
-        self._filename = Path(filename).resolve()
-        if self._filename.suffixes[-2:] == ['.meta', '.json']:
-            # Remove .meta.json suffix if passed with filename
-            self._filename = Path(self._filename.parent, '.'.join(self._filename.name.split('.')[:-2]))
-        self._da_type         = self._da_type_default
-        self._da_dim          = self._da_dim_default
-        self._emitx           = self._emitx_default
-        self._emity           = self._emity_default
-        self._r_max           = self._r_max_default
-        self._max_turns       = self._max_turns_default
-        self._min_turns       = self._min_turns_default
-        self._energy          = self._energy_default
-        self._nseeds          = self._nseeds_default
-        self._pairs_shift     = self._pairs_shift_default
-        self._pairs_shift_var = self._pairs_shift_var_default
-        self._s_start         = self._s_start_default
-        self._submissions     = self._submissions_default
-        self._line_file        = None
-        if not skip_file_generation:
+    def __init__(self, name, *, path=Path.cwd(), use_files=False):
+        # Remove .meta.json suffix if passed with filename
+        if name.split('.')[-2:] == ['meta', 'json']:
+            name = name[:-10]
+        self._name      = name
+        self._use_files = use_files
+        self.path       = path
+        # Initialise defaults
+        for field in self._defaults:
+            setattr(self, '_' + field, self._defaults[field])
+        if use_files:
             if self.meta_file.exists():
                 print("Loading existing DA object.")
                 self._read()
-                # Store again, to update paths if needed
-                self._store()
             else:
                 if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
                      raise ValueError("Tried to create new DA object, but some parquet files already exist!\n" \
                                      + "If you tried to load an existing DA object, make sure to keep the *.meta.json " \
                                      + "file in the same folder as the parquet files, or regenerate the metadata file " \
-                                     + "manually with xdyna.regenerate_da_metadata(). Or, if the parquet files are old/wrong, " \
+                                     + "manually with xdyna.regenerate_meta_file(). Or, if the parquet files are old/wrong, " \
                                      + "just delete them.")
                 print("Creating new DA object.")
                 self._store()
@@ -183,15 +172,19 @@ class _DAMetaData:
 
     @property
     def name(self):
-        return self._filename.name
+        return self._name
 
     @property
     def path(self):
-        return self._filename.parent
+        return self._path if self._use_files else None
+
+    @path.setter
+    def path(self, path):
+        self._path = Path(path).resolve() if self._use_files else None
 
     @property
     def meta_file(self):
-        return Path(self.path, self.name + '.meta.json').resolve()
+        return Path(self.path, self.name + '.meta.json').resolve() if self._use_files else None
 
     @property
     def line_file(self):
@@ -204,15 +197,30 @@ class _DAMetaData:
 
     @property
     def surv_file(self):
-        return Path(self.path, self.name + '.surv.parquet').resolve()
+        return Path(self.path, self.name + '.surv.' + self.db_extension).resolve() if self._use_files else None
 
     @property
     def da_file(self):
-        return Path(self.path, self.name + '.da.parquet').resolve()
+        return Path(self.path, self.name + '.da.' + self.db_extension).resolve() if self._use_files else None
 
     @property
     def da_evol_file(self):
-        return Path(self.path, self.name + '.da_evol.parquet').resolve()
+        return Path(self.path, self.name + '.da_evol.' + self.db_extension).resolve() if self._use_files else None
+
+    @property
+    def db_extension(self):
+        return self._db_extension if self._use_files else None
+
+    @db_extension.setter
+    def db_extension(self, db_extension):
+        if db_extension != self.db_extension:
+            if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
+                raise NotImplementedError('DataFrame currently in different format! Need to translate..")
+            if not db_extension in self._db_extensions:
+                raise ValueError(f"The variable db_extension should be one of {', '.join(self._db_extensions)}!")
+            if db_extension =='db' or db_extension=='hdfs':
+                raise NotImplementedError
+            self._set_property('db_extension', db_extension)
 
     @property
     def da_type(self):
@@ -221,7 +229,7 @@ class _DAMetaData:
     @da_type.setter
     def da_type(self, da_type):
         if not da_type in self._da_types:
-            raise ValueError(f"The variable da_dim should be one of {', '.join(self._da_types)}!")
+            raise ValueError(f"The variable da_type should be one of {', '.join(self._da_types)}!")
         self._set_property('da_type', da_type)
 
     @property
@@ -276,9 +284,10 @@ class _DAMetaData:
 
     @min_turns.setter
     def min_turns(self, min_turns):
-        if not isinstance(min_turns, numbers.Number):
-            raise ValueError(f"The value of min_turns should be a number!")
-        self._set_property('min_turns', round(min_turns))
+        if not isinstance(min_turns, numbers.Number) and min_turns is not None:
+            raise ValueError(f"The value of min_turns should be a number, or None!")
+        min_turns = round(min_turns) if min_turns is not None else None
+        self._set_property('min_turns', min_turns)
         
     @property
     def max_turns(self):
@@ -345,42 +354,47 @@ class _DAMetaData:
 
     @property
     def submissions(self):
-        return self._submissions
+        return self._submissions if self._use_files else None
 
     # Allowed on parallel process
     def new_submission_id(self):
-        with ProtectFile(self.meta_file, 'r+', wait=0.001) as pf:
-            meta = json.load(pf)
-            new_id = len(meta['submissions'].keys())
-            meta['submissions'][new_id] = {}
-            pf.truncate(0)  # Delete file contents (to avoid appending)
-            pf.seek(0)      # Move file pointer to start of file
-            json.dump(meta, pf, indent=2, sort_keys=False)
-            self._submissions = meta
-            return new_id
+        if not self._use_files:
+            return -1
+        else:
+            with ProtectFile(self.meta_file, 'r+', wait=0.002) as pf:
+                meta = json.load(pf)
+                new_id = len(meta['submissions'].keys())
+                meta['submissions'][new_id] = {}
+                pf.truncate(0)  # Delete file contents (to avoid appending)
+                pf.seek(0)      # Move file pointer to start of file
+                json.dump(meta, pf, indent=2, sort_keys=False)
+                self._submissions = meta
+                return new_id
 
-    # Allowed on parallel process
+    # Allowed on parallel process (but only if each process updates only the log attached to its unique ID)
     def update_submissions(self, submission_id, val):
-        with ProtectFile(self.meta_file, 'r+', wait=0.001) as pf:
-            meta = json.load(pf)
-            meta['submissions'].update({str(submission_id): val})
-            pf.truncate(0)  # Delete file contents (to avoid appending)
-            pf.seek(0)      # Move file pointer to start of file
-            json.dump(meta, pf, indent=2, sort_keys=False)
-            self._submissions = meta
+        if self._use_files:
+            with ProtectFile(self.meta_file, 'r+', wait=0.002) as pf:
+                meta = json.load(pf)
+                meta['submissions'].update({str(submission_id): val})
+                pf.truncate(0)  # Delete file contents (to avoid appending)
+                pf.seek(0)      # Move file pointer to start of file
+                json.dump(meta, pf, indent=2, sort_keys=False)
+                self._submissions = meta
 
+    # Not allowed on parallel process!
+    # TODO: make this more robust, by doing read, check, and store all in one "with ProtectFile(.." ?
     def _set_property(self, prop, val):
         if getattr(self, '_' + prop) != val:
             setattr(self, '_' + prop, val)
             self._check_not_changed(ignore=[prop])
             self._store()
-
-    # TODO: is this superfluous?
+    
     def _check_not_changed(self, ignore=[]):
         # Create dict of self fields, ignoring the field that is expected to change
-        # Also ignore optional keys that are not set
-        ignore += [ x for x in self._optional_cols if getattr(self, x) is None ]
-        sortkeys = [ x for x in self._cols if x not in ignore ]
+#         # Also ignore optional keys that are not set
+#         ignore += [ x for x in self._optional_fields if getattr(self, x) is None ]
+        sortkeys = [ x for x in self._fields if x not in ignore ]
         thisdict = { key: getattr(self, key) for key in sortkeys }
         # Special treatment for paths: make them strings
         self._paths_to_strings(thisdict, ignore)
@@ -396,28 +410,55 @@ class _DAMetaData:
                            + "Please check your workflow.")
 
     def _read(self):
-        # Do not read _auto_cols; these are calculated automatically.
-        with ProtectFile(self.meta_file, 'r') as pf:
-            meta = json.load(pf)
-            for key in [ x for x in self._cols if x not in self._auto_cols ]:
-                # Default to None, in case of optional keys
-                val = meta.get(key, None)
-                if key in self._path_cols and val is not None:
-                    val = Path(val)
-                setattr(self, '_' + key, val )
+        if self._use_files:
+            # The _auto_fields (all paths) are calculated automatically at creation.
+            # If those values in the file diverge from the actual ones, the file needs to be updated
+            # (this happens e.g. if the study is moved to a different folder)
+            need_to_store = False
+            with ProtectFile(self.meta_file, 'r+') as pf:
+                meta = json.load(pf)
+                for field in self._fields:
+                    if field in self._auto_fields and getattr(self, field)!=meta.get(field, None):
+                        need_to_store = True
+                    else:
+                        # Default to None, in case of optional keys
+                        val = meta.get(field, None)
+                        if field in self._path_fields and val is not None:
+                            val = Path(val)
+                        setattr(self, '_' + field, val )
+                if need_to_store:
+                    # Special treatment for line:
+                    # If its path is the same as the path variable in the file, then it is considered to be
+                    # in the same folder als the study and its path will be updated as well. Otherwise it is considered
+                    # to have an absolute path and it won't be updated
+                    if self.line_file is not None \
+                            and self.line_file.parent==Path(meta['path']) \
+                            and Path(self.path, self._line_file.name).exists():
+                        self._line_file = Path(self.path, self._line_file.name)
+                    self._store(pf=pf)
 
-    def _store(self):
-        # Store everything except  the optional keys that are None
-        ignore = [ x for x in self._optional_cols if getattr(self, x) is None ]
-        sortkeys = [ x for x in self._cols if x not in ignore ]
-        meta = { key: getattr(self, key) for key in sortkeys }
-        self._paths_to_strings(meta, ignore)
-        mode = 'r+' if self.meta_file.exists() else 'x+'
-        with ProtectFile(self.meta_file, mode) as pf:
-            if mode == 'r+':
+    def _store(self, pf=None):
+        if self._use_files:
+#             # Store everything except the optional fields that are None
+#             ignore = [ x for x in self._optional_fields if getattr(self, x) is None ]
+            ignore = []
+            sortkeys = [ x for x in self._fields if x not in ignore ]
+            meta = { key: getattr(self, key) for key in sortkeys }
+            self._paths_to_strings(meta, ignore)
+            if pf is None:
+                mode = 'r+' if self.meta_file.exists() else 'x+'
+                with ProtectFile(self.meta_file, mode) as pf:
+                    if mode == 'r+':
+                        pf.truncate(0)  # Delete file contents (to avoid appending)
+                        pf.seek(0)      # Move file pointer to start of file
+                    json.dump(meta, pf, indent=2, sort_keys=False)
+            else:
                 pf.truncate(0)  # Delete file contents (to avoid appending)
                 pf.seek(0)      # Move file pointer to start of file
-            json.dump(meta, pf, indent=2, sort_keys=False)
+                json.dump(meta, pf, indent=2, sort_keys=False)
     
     def _paths_to_strings(self, meta, ignore=[]):
-        meta.update({key: getattr(self,key).as_posix() for key in self._path_cols if key not in ignore})
+        meta.update({
+            key: getattr(self,key).as_posix() if getattr(self,key) is not None else None
+            for key in self._path_fields if key not in ignore
+        })
