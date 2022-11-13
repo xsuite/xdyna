@@ -134,7 +134,7 @@ class _DAMetaData:
         'min_turns':       None,
         'max_turns':       None,
         'r_max':           None,
-        'energy':          0,
+        'energy':          None,
         'nseeds':          0,
         'pairs_shift':     0,
         'pairs_shift_var': None,
@@ -149,9 +149,11 @@ class _DAMetaData:
         # Remove .meta.json suffix if passed with filename
         if name.split('.')[-2:] == ['meta', 'json']:
             name = name[:-10]
-        self._name      = name
-        self._use_files = use_files
-        self.path       = path
+        self._name           = name
+        self._use_files      = use_files
+        self.path            = path
+        self._ready_to_store = True
+
         # Initialise defaults
         for field in self._defaults:
             setattr(self, '_' + field, self._defaults[field])
@@ -192,7 +194,8 @@ class _DAMetaData:
 
     @line_file.setter
     def line_file(self, line_file):
-        line_file = Path(line_file).resolve()
+        if line_file != -1:
+            line_file = Path(line_file).resolve()
         self._set_property('line_file', line_file)
 
     @property
@@ -272,9 +275,9 @@ class _DAMetaData:
 
     @r_max.setter
     def r_max(self, r_max):
-        if not isinstance(r_max, numbers.Number):
+        if not isinstance(r_max, numbers.Number) and r_max is not None:
             raise ValueError(f"The property r_max should be a number!")
-        if r_max <= 0:
+        if r_max <= 0 and r_max is not None:
             raise ValueError(f"The property r_max has to be larger than zero!")
         self._set_property('r_max', r_max)
 
@@ -356,41 +359,41 @@ class _DAMetaData:
     def submissions(self):
         return self._submissions if self._use_files else None
 
-    # Allowed on parallel process
+    # Allowed on parallel process.
     def new_submission_id(self):
         if not self._use_files:
-            return -1
+            return None
         else:
-            with ProtectFile(self.meta_file, 'r+', wait=0.002) as pf:
+            with ProtectFile(self.meta_file, 'r+', wait=0.005) as pf:
                 meta = json.load(pf)
                 new_id = len(meta['submissions'].keys())
                 meta['submissions'][new_id] = {}
                 pf.truncate(0)  # Delete file contents (to avoid appending)
                 pf.seek(0)      # Move file pointer to start of file
                 json.dump(meta, pf, indent=2, sort_keys=False)
-                self._submissions = meta
+                self._submissions = meta['submissions']
                 return new_id
 
-    # Allowed on parallel process (but only if each process updates only the log attached to its unique ID)
+    # Allowed on parallel process (but only if each process updates only the log attached to its unique ID).
+    # This will overwrite the value associated to submission_id in self._submissions with val.
     def update_submissions(self, submission_id, val):
         if self._use_files:
-            with ProtectFile(self.meta_file, 'r+', wait=0.002) as pf:
+            with ProtectFile(self.meta_file, 'r+', wait=0.005) as pf:
                 meta = json.load(pf)
                 meta['submissions'].update({str(submission_id): val})
                 pf.truncate(0)  # Delete file contents (to avoid appending)
                 pf.seek(0)      # Move file pointer to start of file
                 json.dump(meta, pf, indent=2, sort_keys=False)
-                self._submissions = meta
+                self._submissions = meta['submissions']
 
     # Not allowed on parallel process!
-    # TODO: make this more robust, by doing read, check, and store all in one "with ProtectFile(.." ?
     def _set_property(self, prop, val):
         if getattr(self, '_' + prop) != val:
             setattr(self, '_' + prop, val)
-            self._check_not_changed(ignore=[prop])
-            self._store()
+            if self._ready_to_store:
+                self._check_not_changed_and_store(ignore=[prop])
     
-    def _check_not_changed(self, ignore=[]):
+    def _check_not_changed_and_store(self, ignore=[]):
         # Create dict of self fields, ignoring the field that is expected to change
 #         # Also ignore optional keys that are not set
 #         ignore += [ x for x in self._optional_fields if getattr(self, x) is None ]
@@ -399,15 +402,17 @@ class _DAMetaData:
         # Special treatment for paths: make them strings
         self._paths_to_strings(thisdict, ignore)
         # Load file
-        with ProtectFile(self.meta_file, 'r') as pf:
+        with ProtectFile(self.meta_file, 'r+') as pf:
             meta = json.load(pf)
-        meta = { key: meta[key] for key in sortkeys }
-        # Compare
-        if meta != thisdict:
-            raise Exception("The metadata file changed on disk!\n" \
-                           + "This is not supposed to happen, and probably means that one of the child processes " \
-                           + "tried to write to it (which is only allowed for the 'submissions' field).\n" \
-                           + "Please check your workflow.")
+            meta = { key: meta[key] for key in sortkeys }
+            # Compare
+            if meta != thisdict:
+                raise Exception("The metadata file changed on disk!\n" \
+                               + "This is not supposed to happen, and probably means that one of the child processes " \
+                               + "tried to write to it (which is only allowed for the 'submissions' field).\n" \
+                               + "Please check your workflow.")
+            else:
+                self._store(pf=pf)
 
     def _read(self):
         if self._use_files:
@@ -458,6 +463,7 @@ class _DAMetaData:
                 json.dump(meta, pf, indent=2, sort_keys=False)
     
     def _paths_to_strings(self, meta, ignore=[]):
+        meta.update({'line_file': 'line manually added' if meta['line_file'] == -1 else meta['line_file']})
         meta.update({
             key: getattr(self,key).as_posix() if getattr(self,key) is not None else None
             for key in self._path_fields if key not in ignore

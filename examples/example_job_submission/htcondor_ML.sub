@@ -1,0 +1,14 @@
+universe              = vanilla
+executable            = /afs/cern.ch/work/f/fvanderv/pythondev/xdyna/examples/example_job_submission/job.sh
+arguments             = /afs/cern.ch/work/f/fvanderv/pythondev/xdyna/examples/example_job_submission/Step2__track_job.py $(Study)
+output                = /afs/cern.ch/work/f/fvanderv/pythondev/xdyna/examples/example_job_submission/htc_logs/ML_variants_ML_extra_$(Study)_$(Step).out
+error                 = /afs/cern.ch/work/f/fvanderv/pythondev/xdyna/examples/example_job_submission/htc_logs/ML_variants_ML_extra_$(Study)_$(Step).err
+log                   = /afs/cern.ch/work/f/fvanderv/pythondev/xdyna/examples/example_job_submission/htc_logs/ML_variants.log
+ShouldTransferFiles   = YES
+WhenToTransferOutput  = ON_EXIT_OR_EVICT
+transfer_output_files  = ""
++JobFlavour = "longlunch"
++AccountingGroup = "group_u_BE.ABP.normal"
+queue Study from (
+    hllhc
+)

@@ -5,14 +5,13 @@ import numpy as np
 from numpy.random import default_rng
 import pandas as pd
 
-# from pathlib import Path
-# import json
-# import os, subprocess
+from pathlib import Path
+import json
 import datetime
 import time
 
 import xobjects as xo
-# import xtrack as xt
+import xtrack as xt
 import xpart as xp
 
 from .protectfile import ProtectFile
@@ -20,8 +19,7 @@ from .da_meta import _DAMetaData
 from .geometry import _bleed, distance_to_polygon_2D
 
 
-
-
+_db_access_wait_time = 0.02
 
 # TODO: Function to generate DA object from meta file
 #       def generate_from_file(filename):
@@ -31,7 +29,7 @@ from .geometry import _bleed, distance_to_polygon_2D
 
 
 class DA:
-    # The real coordinates have to be generated on the machine that will track them.
+    # The real coordinates have to be generated on the machine that will track them (ideally at least).
     # the absolute truth is the sigma; if this translates to slightly different coordinates
     # then that means those machines also have a slightly different closed orbit etc,
     # so the normalised coordinates are still more correct
@@ -44,36 +42,235 @@ class DA:
 #                 'nturns', 'paired_to', 'submitted'
 #              ]
 
-    def __init__(self, filename, *, min_turns=None, max_turns=None, nseeds=0, emittance=None, energy=None,
-                 load_files=False, memory_threshold=1e9):
+    def __init__(self, name, *, path=Path.cwd(), use_files=False, **kwargs):
         # Initialise metadata
-        self._meta = _DAMetaData(filename=filename)
-        self.meta.nseeds = nseeds
+        self._meta = _DAMetaData(name=name, path=path, use_files=use_files)
+        self.meta._ready_to_store = False
+        self.meta.nseeds    = kwargs.get('nseeds', 0)
+        self.meta.max_turns = kwargs.get('max_turns')
+        min_turns           = kwargs.get('min_turns', None)
+        emittance           = kwargs.get('emittance', None)
+        energy              = kwargs.get('energy', None)
+        db_extension        = kwargs.get('db_extension', None)
         if min_turns is not None:
             self.meta.min_turns = min_turns
-        if max_turns is not None:
-            self.meta.max_turns = max_turns
         if emittance is not None:
             self.emittance = emittance
         if energy is not None:
             self.meta.energy = energy
-        self.memory_threshold = memory_threshold
+        if db_extension is not None:
+            self.meta.db_extension = db_extension
 
+        # Initialise DA data
+        self.memory_threshold = kwargs.get('memory_threshold', 1e9)
         self._surv = None
         self._da = None
         self._da_evol = None
         self._active_job = -1
         self._active_job_log = {}
-        if load_files:
+        self._line = None
+        if use_files:
             if self.meta.surv_file.exists():
-                with ProtectFile(self.meta.surv_file, 'rb') as pf:
-                    self._surv = pd.read_parquet(pf)
+                self.read_surv()
             if self.meta.da_file.exists():
-                with ProtectFile(self.meta.da_file, 'rb') as pf:
-                    self._da = pd.read_parquet(pf)
+                self.read_da()
             if self.meta.da_evol_file.exists():
-                with ProtectFile(self.meta.da_evol_file, 'rb') as pf:
-                    self._da_evol = pd.read_parquet(pf)
+                self.read_da_evol()
+            if self.meta.line_file is not None and self.meta.line_file != -1 and self.meta.line_file.exists():
+                self.load_line_from_file()
+
+
+
+    # =================================================================
+    # ======================= Class attributes ========================
+    # =================================================================
+
+    @property
+    def survival_data(self):
+        if self._surv is None:
+            if self.meta.surv_file.exists():
+                self.read_surv()
+            else:
+                return None
+        if self.da_type == 'radial':
+            if self.da_dimension == 2:
+                view_cols = ['ang_xy', 'r_xy']
+            elif self.da_dimension == 3:
+                view_cols = ['ang_xy', 'r_xy', 'delta_in']
+            elif self.da_dimension == 4:
+                view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy']
+            elif self.da_dimension == 5:
+                view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'delta_in']
+            elif self.da_dimension == 6:
+                view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'zeta_in', 'delta_in']
+            else:
+                view_cols = 'all'
+        else:
+            if self.da_dimension == 2:
+                view_cols = ['x_norm_in', 'y_norm_in']
+            elif self.da_dimension == 3:
+                view_cols = ['x_norm_in', 'y_norm_in', 'delta_in']
+            elif self.da_dimension == 4:
+                view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in']
+            elif self.da_dimension == 5:
+                view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'delta_in']
+            elif self.da_dimension == 6:
+                view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
+            else:
+                view_cols = 'all'
+        if view_cols == 'all':
+            df = self._surv
+        else:
+            if self.meta.nseeds > 0:
+                view_cols += ['seed']
+            if self.meta.pairs_shift == 0:
+                view_cols += ['nturns']
+                df = self._surv[view_cols]
+            else:
+                orig = self._surv['paired_to'] == self._surv.index
+                df = self._surv.loc[orig,view_cols]
+                # Change to np.array to ignore index
+                df['nturns1'] = np.array(self._surv.loc[orig,'nturns'])
+                df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
+        return df.rename(columns = {
+                    'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
+                    'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
+                }, inplace=False)
+
+    @property
+    def meta(self):
+        return self._meta
+
+    @property
+    def da_type(self):
+        return self.meta.da_type
+
+    @property
+    def da_dimension(self):
+        return self.meta._da_dim
+
+    @property
+    def max_turns(self):
+        return self.meta.max_turns
+
+    @max_turns.setter
+    def max_turns(self, max_turns):
+        if max_turns <= self.meta.max_turns:
+            print("Warning: new value for max_turns smaller than or equal to existing max_turns! Nothing done."
+            return
+        if self.meta.surv_file.exists():
+            # Need to flag particles that survived to previously defined max_turns as to be resubmitted:
+            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                self.read_surv(pf)
+                mask = self._surv['nturns'] == self.meta.max_turns
+                self._surv.loc[mask, 'x_out'] = -1
+                self._surv.loc[mask, 'y_out'] = -1
+                self._surv.loc[mask, 'px_out'] = -1
+                self._surv.loc[mask, 'py_out'] = -1
+                self._surv.loc[mask, 'zeta_out'] = -1
+                self._surv.loc[mask, 'delta_out'] = -1
+                self._surv.loc[mask, 's_out'] = -1
+                self._surv.loc[mask, 'state'] = 1
+                self._surv.loc[mask, 'submitted'] = False
+                self._surv.loc[mask, 'finished'] = False
+                self.write_surv(pf)
+        self.meta.max_turns = max_turns
+
+    @property
+    def emittance(self):
+        if self.meta.emitx is None or self.meta.emity is None:
+            return None
+        else:
+            return [self.meta.emitx, self.meta.emity]
+
+    # Not allowed on parallel process
+    @emittance.setter
+    def emittance(self, emit, update_surv=True):
+        oldemittance = self.emittance
+        if hasattr(emit, '__iter__'):
+            if isinstance(emit, str):
+                raise ValueError(f"The emittance has to be a number!")
+            elif len(emit) == 2:
+                self.meta.emitx = emit[0]
+                self.meta.emity = emit[1]
+            elif len(emit) == 1:
+                self.meta.emitx = emit[0]
+                self.meta.emity = emit[0]
+            else:
+                raise ValueError(f"The emittance must have one or two values (for emitx and emity)!")
+        else:
+            self.meta.emitx = emit
+            self.meta.emity = emit
+        # Recalculate initial conditions if set
+        if hasattr(self,'_surv') and self._surv is not None and oldemittance is not None \
+                and self.emittance != oldemittance and update_surv:
+            print("Updating emittance")
+            corr_x = np.sqrt( oldemittance[0] / self.meta.emitx )
+            corr_y = np.sqrt( oldemittance[1] / self.meta.emity )
+            with ProtectFile(self.meta.surv_file, 'r+b') as pf:
+                self.read_surv(pf)
+                self._surv['x_norm_in']  *= corr_x
+                self._surv['px_norm_in'] *= corr_x
+                self._surv['y_norm_in']  *= corr_y
+                self._surv['py_norm_in'] *= corr_y
+                self._surv['r_xy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['y_norm_in']**2 )
+                self._surv['r_xpxypy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['px_norm_in']**2 \
+                                                + self._surv['y_norm_in']**2 + self._surv['py_norm_in']**2 )
+                self.write_surv(pf)
+            
+    @property
+    def line(self):
+        return self._line
+            
+    @line.setter
+    def line(self, line):
+        if line is None:
+            if self.meta.line_file == -1:
+                self.meta.line_file = None  # The line is no longer manually added
+            self._line = None
+        else:
+            self.meta.line_file = -1  # Mark line as manually added
+            self._line = line
+            if self.meta.nseeds == 0:
+                # No seeds, so self.line is just the line
+                if not isinstance(line, xt.Line) and 
+                    self._line = xt.Line.from_dict(line)
+            else:
+                # Seeds, so line is a dict of lines
+                for seed, this_line in line.items():
+                    if not isinstance(this_line, xt.Line):
+                        self._line[seed] = xt.Line.from_dict(this_line)
+
+    @property
+    def line_file(self):
+        if self.meta.line_file == -1:
+            return 'line manually added'
+        else:
+            return self.meta.line_file
+
+    @line_file.setter
+    def line_file(self, file):
+        self.meta.line_file = line_file
+
+    def load_line_from_file(self, file=None):
+        if self.line_file is not None and and self.line_file != -1 and file != self.line_file:
+            raise ValueError("Trying to load different line than the one specified in the metafile! " + \
+                             "This is not allowed. If you want to remove the line from the metafile, " + \
+                             "please do DA.line_file = None.")
+        if self.line_file == -1:
+            # Remove existing line that was added manually
+            self.line = None
+        if file is None:
+            if self.line_file is None:
+                print("Warning: no file given and no file specified in the metafile! No line loaded.")
+                return
+            else:
+                file = self.line_file
+        self.line_file = file
+        with ProtectFile(file, 'r') as pf:
+            line = json.load(pf)
+        self.line = line
+
 
 
     # =================================================================
@@ -82,11 +279,9 @@ class DA:
 
     def _prepare_generation(self, emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         # Does survival already exist?
-        if self._surv is not None:
+        if self.survival_data is not None:
             print("Warning: Initial conditions already exist! No generation done.")
             return
-        if self.meta.surv_file.exists():
-            raise Exception("Survival parquet file already exists! Cannot generate new initial conditions.")
 
         # If non-default values are specified, copy them to the metadata
         # In the grid generation further below, only the metadat values
@@ -141,8 +336,6 @@ class DA:
     def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
-
-        traditionally this is .000000001
         """
         self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
         # Make the data
@@ -183,8 +376,7 @@ class DA:
         self._surv['submitted'] = False
         self._surv['finished'] = False
         self._create_pairs()
-        with ProtectFile(self.meta.surv_file, 'x+b') as pf:
-            self._surv.to_parquet(pf, index=True)
+        self.write_surv()
         self.meta.da_type = 'monte_carlo'
         self.meta.da_dim = 2
         self.meta.r_max = r_max
@@ -196,8 +388,6 @@ class DA:
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D polar grid.
-
-        traditionally this is .000000001
         """
         self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
 
@@ -253,8 +443,7 @@ class DA:
         self._surv['submitted'] = False
         self._surv['finished'] = False
         self._create_pairs()
-        with ProtectFile(self.meta.surv_file, 'x+b') as pf:
-            self._surv.to_parquet(pf, index=True)
+        self.write_surv()
         self.meta.da_type = 'radial'
         self.meta.da_dim = 2
         self.meta.r_max = r_max
@@ -282,9 +471,9 @@ class DA:
                       + "Ignored the new value.")
 
         # Get existing results
-        if self.surv_data is None:
+        if self.survival_data is None:
             raise ValueError("No survival data found!")
-        data = self.surv_data
+        data = self.survival_data
         # TODO: check that all px_norm etc are the same
         px_norm = np.unique(self._surv['px_norm_in'])[0]
         py_norm = np.unique(self._surv['py_norm_in'])[0]
@@ -407,27 +596,50 @@ class DA:
                             self._surv,
                             df_new
                     ], ignore_index=True)
+        self.write_surv()
 
-        with ProtectFile(self.meta.surv_file, 'wb') as pf:
-            self._surv.to_parquet(pf, index=True, engine="pyarrow")
 
+    # =================================================================
+    # ========================= Calculate DA ==========================
+    # =================================================================
+
+
+    # Not allowed on parallel process
+    def calculate_da(self):
+        if da_type == 'radial':
+            pass
+        elif da_type == 'grid':
+            pass
+        elif da_type in ['monte_carlo', 'free']:
+            pass # ML
 
 
     # =================================================================
     # ==================== Xtrack tracking jobs =======================
     # =================================================================
 
-    # TODO: if job has failed, it remains on submitted=True and finished=False so it won't resubmit.
-    # How to change this?
-
     # Allowed on parallel process
-    def track_job(self, *,  npart, tracker, turns=None, resubmit_unfinished=False, logging=False):
-        if tracker is None:
-            raise ValueError()
+    def track_job(self, *,  npart=None, logging=True, force_single_seed_per_job=None):
+        if self.line is None:
+            raise Exception("Need to load line first!")
             
         # Create a job: get job ID and start logging
-        part_ids = self._create_job(npart, turns, resubmit_unfinished, logging)
+        part_ids, seeds = self._create_job(npart, logging, force_single_seed_per_job)
         job_id = str(self._active_job)
+
+        # Build tracker(s) if not yet done
+        if self.meta.nseeds == 0:
+            if self.line.tracker is None:
+                print(f"Building tracker.")
+                self.line.build_tracker()
+        else:
+            if 0 in self.line.keys():
+                # Line file dict is 0-indexed
+                seeds = [ seed-1 for seed in seeds ]
+            for seed in seeds:
+                if self.line[seed].tracker is None:
+                    print(f"Building tracker for seed {seed}.")
+                    self.line[seed].build_tracker()
 
         # Create initial particles
         x_norm  = self._surv['x_norm_in'].to_numpy()
@@ -437,16 +649,16 @@ class DA:
         zeta    = self._surv['zeta_in'].to_numpy()
         delta   = self._surv['delta_in'].to_numpy()
 
-        context=tracker._buffer.context
+        context = self.line.tracker._buffer.context
         part = xp.build_particles(_context=context,
-                          tracker=tracker,
+                          tracker=self.line.tracker,
                           x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
                           scale_with_transverse_norm_emitt=self.emittance
                          )
         # Track
         if logging:
             self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.')
-        tracker.track(particles=part, num_turns=self.this_turns)
+        self.line.tracker.track(particles=part, num_turns=self.meta.max_turns)
         context.synchronize()
         if logging:
             self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.')
@@ -464,22 +676,19 @@ class DA:
         s_out     = context.nparray_from_context_array(part.s)[sort]
         state     = context.nparray_from_context_array(part.state)[sort]
 
-        with ProtectFile(self.meta.surv_file, 'r+b', wait=0.02) as pf:
-            full_surv = pd.read_parquet(pf)
-            full_surv.loc[part_ids, 'finished'] = True
-            full_surv.loc[part_ids, 'x_out'] = x_out
-            full_surv.loc[part_ids, 'y_out'] = y_out
-            full_surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
-            full_surv.loc[part_ids, 'px_out'] = px_out
-            full_surv.loc[part_ids, 'py_out'] = py_out
-            full_surv.loc[part_ids, 'zeta_out'] = zeta_out
-            full_surv.loc[part_ids, 'delta_out'] = delta_out
-            full_surv.loc[part_ids, 's_out'] = s_out
-            full_surv.loc[part_ids, 'state'] = state
-            pf.truncate(0)  # Delete file contents (to avoid appending)
-            pf.seek(0)      # Move file pointer to start of file
-            full_surv.to_parquet(pf, index=True)
-        self._surv = full_surv
+        with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+            self.read_surv(pf)
+            self._surv.loc[part_ids, 'finished'] = True
+            self._surv.loc[part_ids, 'x_out'] = x_out
+            self._surv.loc[part_ids, 'y_out'] = y_out
+            self._surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
+            self._surv.loc[part_ids, 'px_out'] = px_out
+            self._surv.loc[part_ids, 'py_out'] = py_out
+            self._surv.loc[part_ids, 'zeta_out'] = zeta_out
+            self._surv.loc[part_ids, 'delta_out'] = delta_out
+            self._surv.loc[part_ids, 's_out'] = s_out
+            self._surv.loc[part_ids, 'state'] = state
+            self.write_surv(pf)
 
         if logging:
             self._update_job_log({
@@ -488,230 +697,193 @@ class DA:
             })
 
 
+    # NOT allowed on parallel process!
+    def resubmit_unfinished(self):
+        with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+            self.read_surv(pf)
+            mask = self._surv['finished'] == False
+            self._surv.loc[mask, 'submitted'] = False
+            self.write_surv(pf)
+
 
     # =================================================================
     # ==================== Manage tracking jobs =======================
     # =================================================================
 
     # Allowed on parallel process
-    def _create_job(self, npart, turns, resubmit_unfinished=False, logging=False):
-        if turns is not None:
-            if self.meta.max_turns is None:
-                self.meta.max_turns = turns
-            elif turns < self.meta.max_turns:
-                print("Warning: The argument 'turns' was set a value lower than DA.max_turns! "
-                      + "Ignored the former.")
-            elif turns > self.meta.max_turns:
-#                 if self.meta.max_turns != _DAMetaData._turns_default:
-#                 self.this_turns = turns
-                raise NotImplementedError
-        self.this_turns = self.meta.max_turns
-        if self.this_turns == _DAMetaData._max_turns_default:
-            raise ValueError("Number of tracking turns not set! Cannot track.")
+    def _create_job(self, npart=None, logging=True, force_single_seed_per_job=None):
         # Get job ID
-        self._active_job = self.meta.new_submission_id() if logging else 0
-        with ProtectFile(self.meta.surv_file, 'r+b', wait=0.02) as pf:
+        self._active_job = self.meta.new_submission_id() if logging else None
+
+        if npart is None:
+            # If tracking all particles, default to all seeds as well
+            if force_single_seed_per_job is None:
+                force_single_seed_per_job = False
+            txt = ' over all seeds' if self.meta.nseeds > 0 and not force_single_seed_per_job else ''
+            print(f"Tracking all available particles{txt}. Make sure this is not ran on a parallel process, " + \
+                   "as results might be unpredictable and probably wrong.")
+        else:
+            force_single_seed_per_job = True if force_single_seed_per_job is None else force_single_seed_per_job
+
+        with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
             # Get the first npart particle IDs that are not yet submitted
             # TODO: this can probably be optimised by only reading last column
-            self._surv = pd.read_parquet(pf)
-            # TODO: this doesn't work as multiple jobs will do the same particles..
-#             if resubmit_unfinished:
-#                 mask = self._surv['finished'] == False
-#             else:
-#                 mask = self._surv['submitted'] == False
+            self.read_surv(pf)
             mask = self._surv['submitted'] == False
-            this_part_ids = self._surv[mask].index[:npart]
-            # If there are seeds, only take jobs from one seed
+            if npart is None:
+                this_part_ids = self._surv[mask].index
+            else:
+                this_part_ids = self._surv[mask].index[:npart]
             if self.meta.nseeds > 0:
                 df = self._surv.loc[this_part_ids]
                 seeds = np.unique(df['seed'])
-                seed = seeds[0]
-                mask = df['seed'] == seed
-                this_part_ids = df.loc[mask].index
+                if force_single_seed_per_job:
+                    # Only take jobs from one seed
+                    seeds = seeds[:1]
+                    mask = df['seed'] == seeds[0]
+                    this_part_ids = df.loc[mask].index
             else:
-                seed = 0
+                seeds = None
             # Quit the job if no particles need to be submitted
             if len(this_part_ids) == 0:
                 print("No more particles to submit! Exiting...")
                 # TODO: this doesn't work!
                 if logging:
+                    # The submissions log for this job will only have a status field
                     self.meta.update_submissions(self._active_job, {'status': 'No submission needed.'})
                 exit()
             # Otherwise, flag the particles as submitted, before releasing the file again
             self._surv.loc[this_part_ids, 'submitted'] = True
-            pf.truncate(0)  # Delete file contents (to avoid appending)
-            pf.seek(0)      # Move file pointer to start of file
-            self._surv.to_parquet(pf, index=True)
+            self.write_surv(pf)
         # Reduce dataframe to only those particles in this job
         self._surv = self._surv.loc[this_part_ids]
+
         # Submission info
         if logging:
             self._active_job_log = {
                     'submission_time': datetime.datetime.now().isoformat(),
                     'finished_time':   0,
                     'status':          'Running',
-                    'tracking_turns':  self.this_turns,
+                    'tracking_turns':  self.meta.max_turns,
                     'particle_ids':    '[' + ', '.join([str(pid) for pid in this_part_ids]) + ']',
-                    'seed':            int(seed),
+                    'seeds':           [ int(seed) for seed in seeds ] if seeds is not None else None,
                     'warnings':        [],
                     'output':          [],
             }
-        return this_part_ids
+        return this_part_ids, seeds
+
 
 
     # Allowed on parallel process
     def _update_job_log(self, update):
-        self._active_job_log.update(update)
-        self.meta.update_submissions(self._active_job, self._active_job_log)
+        if logging:
+            self._active_job_log.update(update)
+            self.meta.update_submissions(self._active_job, self._active_job_log)
 
     # Allowed on parallel process
     def _append_job_log(self, key, update):
-        self._active_job_log[key].append(update)
-        self.meta.update_submissions(self._active_job, self._active_job_log)
-
-    # Allowed on parallel process
-    def _fail_job(self, failtext):
-        self._active_job_log['status'] = 'Failed: ' + failtext
-        self.meta.update_submissions(self._active_job, self._active_job_log)
-        raise Exception(failtext)
+        if logging:
+            self._active_job_log[key].append(update)
+            self.meta.update_submissions(self._active_job, self._active_job_log)
 
     # Allowed on parallel process
     def _warn_job(self, warntext):
-        self._active_job_log['warnings'].append(warntext)
-        self.meta.update_submissions(self._active_job, self._active_job_log)
+        if logging:
+            self._append_job_log('warnings', warntext)
         print(warntext)
 
+    # Allowed on parallel process
+    def _fail_job(self, failtext):
+        if logging:
+            self._update_job_log({
+                'finished_time': datetime.datetime.now().isoformat(),
+                'status': 'Failed: ' + failtext
+            })
+        raise Exception(failtext)
 
 
     # =================================================================
-    # ========================= Calculate DA ==========================
+    # ======================= Database handling =======================
     # =================================================================
 
+    def read_surv(self, pf=None):
+        if self.meta._use_files:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.surv_file, 'rb', wait=_db_access_wait_time) as pf:
+                        self._surv = pd.read_parquet(pf, engine="pyarrow")
+                else:
+                    self._surv = pd.read_parquet(pf, engine="pyarrow")
+            else:
+                raise NotImplementedError
 
-    # Not allowed on parallel process
-    def calculate_da(self):
-        if da_type == 'radial':
-            pass
-        elif da_type == 'grid':
-            pass
-        elif da_type in ['monte_carlo', 'free']:
-            pass # ML
+    def write_surv(self, pf=None):
+        if self.meta._use_files:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.surv_file, 'wb', wait=_db_access_wait_time) as pf:
+                        self._surv.to_parquet(pf, index=True, engine="pyarrow")
+                else:
+                    pf.truncate(0)  # Delete file contents (to avoid appending)
+                    pf.seek(0)      # Move file pointer to start of file
+                    self._surv.to_parquet(pf, index=True, engine="pyarrow")
+            else:
+                raise NotImplementedError
+
+    def read_da(self, pf=None):
+        if self.meta._use_files:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.da_file, 'rb', wait=_db_access_wait_time) as pf:
+                        self._da = pd.read_parquet(pf, engine="pyarrow")
+                else:
+                    self._da = pd.read_parquet(pf, engine="pyarrow")
+            else:
+                raise NotImplementedError
+
+    def write_da(self, pf=None):
+        if self.meta._use_files:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.da_file, 'wb', wait=_db_access_wait_time) as pf:
+                        self._da.to_parquet(pf, index=True, engine="pyarrow")
+                else:
+                    pf.truncate(0)  # Delete file contents (to avoid appending)
+                    pf.seek(0)      # Move file pointer to start of file
+                    self._da.to_parquet(pf, index=True, engine="pyarrow")
+            else:
+                raise NotImplementedError
+
+    def read_da_evol(self, pf=None):
+        if self.meta._use_files:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.da_evol_file, 'rb', wait=_db_access_wait_time) as pf:
+                        self._da_evol = pd.read_parquet(pf, engine="pyarrow")
+                else:
+                    self._da_evol = pd.read_parquet(pf, engine="pyarrow")
+            else:
+                raise NotImplementedError
+
+    def write_da_evol(self, pf=None):
+        if self.meta._use_files:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.da_evol_file, 'wb', wait=_db_access_wait_time) as pf:
+                        self._da_evol.to_parquet(pf, index=True, engine="pyarrow")
+                else:
+                    pf.truncate(0)  # Delete file contents (to avoid appending)
+                    pf.seek(0)      # Move file pointer to start of file
+                    self._da_evol.to_parquet(pf, index=True, engine="pyarrow")
+            else:
+                raise NotImplementedError
 
     # =================================================================
     # ============================ Plot DA ============================
     # =================================================================
-
+    
+    
     # =================================================================
-    # ======================= Class attributes ========================
-    # =================================================================
-
-    # Not allowed on parallel process
-    @property
-    def surv_data(self):
-        if self._surv is None:
-            if self.meta.surv_file.exists():
-                with ProtectFile(self.meta.surv_file, 'rb') as pf:
-                    self._surv = pd.read_parquet(pf)
-            else:
-                return None
-        if self.da_type == 'radial':
-            if self.da_dimension == 2:
-                view_cols = ['ang_xy', 'r_xy']
-            elif self.da_dimension == 3:
-                view_cols = ['ang_xy', 'r_xy', 'delta_in']
-            elif self.da_dimension == 4:
-                view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy']
-            elif self.da_dimension == 5:
-                view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'delta_in']
-            else:
-                view_cols = 'all'
-        else:
-            if self.da_dimension == 2:
-                view_cols = ['x_norm_in', 'y_norm_in']
-            elif self.da_dimension == 3:
-                view_cols = ['x_norm_in', 'y_norm_in', 'delta_in']
-            elif self.da_dimension == 4:
-                view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in']
-            elif self.da_dimension == 5:
-                view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'delta_in']
-            elif self.da_dimension == 6:
-                view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
-            else:
-                view_cols = 'all'
-        if view_cols == 'all':
-            df = self._surv
-        else:
-            if self.meta.nseeds > 0:
-                view_cols += ['seed']
-            if self.meta.pairs_shift == 0:
-                view_cols += ['nturns']
-                df = self._surv[view_cols]
-            else:
-                orig = self._surv['paired_to'] == self._surv.index
-                df = self._surv.loc[orig,view_cols]
-                # Change to np.array to ignore index
-                df['nturns1'] = np.array(self._surv.loc[orig,'nturns'])
-                df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
-        return df.rename(columns = {
-                    'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
-                    'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
-                }, inplace=False)
-
-    @property
-    def meta(self):
-        return self._meta
-
-    @property
-    def da_type(self):
-        return self.meta.da_type
-
-    @property
-    def da_dimension(self):
-        return self.meta._da_dim
-
-    @property
-    def emittance(self):
-        if self.meta.emitx is None or self.meta.emity is None:
-            return None
-        else:
-            return [self.meta.emitx, self.meta.emity]
-
-    # Not allowed on parallel process
-    @emittance.setter
-    def emittance(self, emit, update_surv=True):
-        oldemittance = self.emittance
-        if hasattr(emit, '__iter__'):
-            if isinstance(emit, str):
-                raise ValueError(f"The emittance has to be a number!")
-            elif len(emit) == 2:
-                self.meta.emitx = emit[0]
-                self.meta.emity = emit[1]
-            elif len(emit) == 1:
-                self.meta.emitx = emit[0]
-                self.meta.emity = emit[0]
-            else:
-                raise ValueError(f"The emittance must have one or two values (for emitx and emity)!")
-        else:
-            self.meta.emitx = emit
-            self.meta.emity = emit
-        # Recalculate initial conditions if set
-        if hasattr(self,'_surv') and self._surv is not None and oldemittance is not None \
-        and self.emittance != oldemittance and update_surv:
-            print("Updating emittance")
-            corr_x = np.sqrt( oldemittance[0] / self.meta.emitx )
-            corr_y = np.sqrt( oldemittance[1] / self.meta.emity )
-            with ProtectFile(self.meta.surv_file, 'r+b') as pf:
-                self._surv = pd.read_parquet(pf)
-                self._surv['x_norm_in']  *= corr_x
-                self._surv['px_norm_in'] *= corr_x
-                self._surv['y_norm_in']  *= corr_y
-                self._surv['py_norm_in'] *= corr_y
-                self._surv['r_xy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['y_norm_in']**2 )
-                self._surv['r_xpxypy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['px_norm_in']**2 \
-                                                + self._surv['y_norm_in']**2 + self._surv['py_norm_in']**2 )
-                pf.truncate(0)  # Delete file contents (to avoid appending)
-                pf.seek(0)      # Move file pointer to start of file
-                self._surv.to_parquet(pf, index=True)
  
     def convert_to_radial(self):
         # impossible; only to add dimensions or something like that
