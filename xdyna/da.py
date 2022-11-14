@@ -156,7 +156,7 @@ class DA:
     @max_turns.setter
     def max_turns(self, max_turns):
         if max_turns <= self.meta.max_turns:
-            print("Warning: new value for max_turns smaller than or equal to existing max_turns! Nothing done."
+            print("Warning: new value for max_turns smaller than or equal to existing max_turns! Nothing done.")
             return
         if self.meta.surv_file.exists():
             # Need to flag particles that survived to previously defined max_turns as to be resubmitted:
@@ -233,7 +233,8 @@ class DA:
             self._line = line
             if self.meta.nseeds == 0:
                 # No seeds, so self.line is just the line
-                if not isinstance(line, xt.Line) and 
+                # if not isinstance(line, xt.Line) and  # what should happen here?
+                if not isinstance(line, xt.Line): 
                     self._line = xt.Line.from_dict(line)
             else:
                 # Seeds, so line is a dict of lines
@@ -253,7 +254,7 @@ class DA:
         self.meta.line_file = line_file
 
     def load_line_from_file(self, file=None):
-        if self.line_file is not None and and self.line_file != -1 and file != self.line_file:
+        if self.line_file is not None and self.line_file != -1 and file != self.line_file:
             raise ValueError("Trying to load different line than the one specified in the metafile! " + \
                              "This is not allowed. If you want to remove the line from the metafile, " + \
                              "please do DA.line_file = None.")

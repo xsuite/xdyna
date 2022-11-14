@@ -218,7 +218,7 @@ class _DAMetaData:
     def db_extension(self, db_extension):
         if db_extension != self.db_extension:
             if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
-                raise NotImplementedError('DataFrame currently in different format! Need to translate..")
+                raise NotImplementedError('DataFrame currently in different format! Need to translate..')
             if not db_extension in self._db_extensions:
                 raise ValueError(f"The variable db_extension should be one of {', '.join(self._db_extensions)}!")
             if db_extension =='db' or db_extension=='hdfs':
