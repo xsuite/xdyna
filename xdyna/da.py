@@ -8,6 +8,7 @@ import pandas as pd
 from pathlib import Path
 import json
 import datetime
+import os
 import time
 
 import xobjects as xo
@@ -45,7 +46,7 @@ class DA:
     def __init__(self, name, *, path=Path.cwd(), use_files=False, **kwargs):
         # Initialise metadata
         self._meta = _DAMetaData(name=name, path=path, use_files=use_files)
-        self.meta._ready_to_store = False
+        self.meta._store_properties = False
         self.meta.nseeds    = kwargs.get('nseeds', 0)
         self.meta.max_turns = kwargs.get('max_turns')
         min_turns           = kwargs.get('min_turns', None)
@@ -55,11 +56,12 @@ class DA:
         if min_turns is not None:
             self.meta.min_turns = min_turns
         if emittance is not None:
-            self.emittance = emittance
+            self.update_emittance(emittance, update_surv=False)
         if energy is not None:
             self.meta.energy = energy
         if db_extension is not None:
             self.meta.db_extension = db_extension
+        self.meta._store()
 
         # Initialise DA data
         self.memory_threshold = kwargs.get('memory_threshold', 1e9)
@@ -69,15 +71,11 @@ class DA:
         self._active_job = -1
         self._active_job_log = {}
         self._line = None
-        if use_files:
-            if self.meta.surv_file.exists():
-                self.read_surv()
-            if self.meta.da_file.exists():
-                self.read_da()
-            if self.meta.da_evol_file.exists():
-                self.read_da_evol()
-            if self.meta.line_file is not None and self.meta.line_file != -1 and self.meta.line_file.exists():
-                self.load_line_from_file()
+        self.read_surv()
+        self.read_da()
+        self.read_da_evol()
+        if self.meta.line_file is not None and self.meta.line_file != -1 and self.meta.line_file.exists():
+            self.load_line_from_file()
 
 
 
@@ -88,10 +86,9 @@ class DA:
     @property
     def survival_data(self):
         if self._surv is None:
-            if self.meta.surv_file.exists():
-                self.read_surv()
-            else:
-                return None
+            self.read_surv()
+        if self._surv is None:  # also nothing on file
+            return None
         if self.da_type == 'radial':
             if self.da_dimension == 2:
                 view_cols = ['ang_xy', 'r_xy']
@@ -103,8 +100,6 @@ class DA:
                 view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'delta_in']
             elif self.da_dimension == 6:
                 view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'zeta_in', 'delta_in']
-            else:
-                view_cols = 'all'
         else:
             if self.da_dimension == 2:
                 view_cols = ['x_norm_in', 'y_norm_in']
@@ -116,22 +111,17 @@ class DA:
                 view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'delta_in']
             elif self.da_dimension == 6:
                 view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
-            else:
-                view_cols = 'all'
-        if view_cols == 'all':
-            df = self._surv
+        if self.meta.nseeds > 0:
+            view_cols += ['seed']
+        if self.meta.pairs_shift == 0:
+            view_cols += ['nturns']
+            df = self._surv[view_cols]
         else:
-            if self.meta.nseeds > 0:
-                view_cols += ['seed']
-            if self.meta.pairs_shift == 0:
-                view_cols += ['nturns']
-                df = self._surv[view_cols]
-            else:
-                orig = self._surv['paired_to'] == self._surv.index
-                df = self._surv.loc[orig,view_cols]
-                # Change to np.array to ignore index
-                df['nturns1'] = np.array(self._surv.loc[orig,'nturns'])
-                df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
+            orig = self._surv['paired_to'] == self._surv.index
+            df = self._surv.loc[orig,view_cols]
+            # Change to np.array to ignore index
+            df['nturns1'] = np.array(self._surv.loc[orig,'nturns'])
+            df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
         return df.rename(columns = {
                     'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
                     'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
@@ -156,25 +146,11 @@ class DA:
     @max_turns.setter
     def max_turns(self, max_turns):
         if max_turns <= self.meta.max_turns:
-            print("Warning: new value for max_turns smaller than or equal to existing max_turns! Nothing done."
+            print("Warning: new value for max_turns smaller than or equal to existing max_turns! Nothing done.")
             return
-        if self.meta.surv_file.exists():
-            # Need to flag particles that survived to previously defined max_turns as to be resubmitted:
-            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
-                self.read_surv(pf)
-                mask = self._surv['nturns'] == self.meta.max_turns
-                self._surv.loc[mask, 'x_out'] = -1
-                self._surv.loc[mask, 'y_out'] = -1
-                self._surv.loc[mask, 'px_out'] = -1
-                self._surv.loc[mask, 'py_out'] = -1
-                self._surv.loc[mask, 'zeta_out'] = -1
-                self._surv.loc[mask, 'delta_out'] = -1
-                self._surv.loc[mask, 's_out'] = -1
-                self._surv.loc[mask, 'state'] = 1
-                self._surv.loc[mask, 'submitted'] = False
-                self._surv.loc[mask, 'finished'] = False
-                self.write_surv(pf)
-        self.meta.max_turns = max_turns
+        # Need to flag particles that survived to previously defined max_turns as to be resubmitted
+        # TODO: need to test
+        self.reset_survival_output(mask_by='nturns', mask_func=(lambda x: x == self.meta.max_turns))
 
     @property
     def emittance(self):
@@ -184,8 +160,7 @@ class DA:
             return [self.meta.emitx, self.meta.emity]
 
     # Not allowed on parallel process
-    @emittance.setter
-    def emittance(self, emit, update_surv=True):
+    def update_emittance(self, emit, update_surv=True):
         oldemittance = self.emittance
         if hasattr(emit, '__iter__'):
             if isinstance(emit, str):
@@ -202,13 +177,22 @@ class DA:
             self.meta.emitx = emit
             self.meta.emity = emit
         # Recalculate initial conditions if set
-        if hasattr(self,'_surv') and self._surv is not None and oldemittance is not None \
-                and self.emittance != oldemittance and update_surv:
+        if update_surv and self._surv is not None and oldemittance is not None and self.emittance != oldemittance:
             print("Updating emittance")
             corr_x = np.sqrt( oldemittance[0] / self.meta.emitx )
             corr_y = np.sqrt( oldemittance[1] / self.meta.emity )
-            with ProtectFile(self.meta.surv_file, 'r+b') as pf:
-                self.read_surv(pf)
+            if self.surv_exists():
+                with ProtectFile(self.meta.surv_file, 'r+b') as pf:
+                    self.read_surv(pf)
+                    self._surv['x_norm_in']  *= corr_x
+                    self._surv['px_norm_in'] *= corr_x
+                    self._surv['y_norm_in']  *= corr_y
+                    self._surv['py_norm_in'] *= corr_y
+                    self._surv['r_xy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['y_norm_in']**2 )
+                    self._surv['r_xpxypy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['px_norm_in']**2 \
+                                                    + self._surv['y_norm_in']**2 + self._surv['py_norm_in']**2 )
+                    self.write_surv(pf)
+            elif self._surv is not None:
                 self._surv['x_norm_in']  *= corr_x
                 self._surv['px_norm_in'] *= corr_x
                 self._surv['y_norm_in']  *= corr_y
@@ -216,8 +200,7 @@ class DA:
                 self._surv['r_xy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['y_norm_in']**2 )
                 self._surv['r_xpxypy'] = np.sqrt( self._surv['x_norm_in']**2 + self._surv['px_norm_in']**2 \
                                                 + self._surv['y_norm_in']**2 + self._surv['py_norm_in']**2 )
-                self.write_surv(pf)
-            
+
     @property
     def line(self):
         return self._line
@@ -233,13 +216,21 @@ class DA:
             self._line = line
             if self.meta.nseeds == 0:
                 # No seeds, so self.line is just the line
-                if not isinstance(line, xt.Line) and 
+                if not isinstance(line, xt.Line):
                     self._line = xt.Line.from_dict(line)
             else:
                 # Seeds, so line is a dict of lines
                 for seed, this_line in line.items():
                     if not isinstance(this_line, xt.Line):
                         self._line[seed] = xt.Line.from_dict(this_line)
+
+    @property
+    def madx_file(self):
+        return self.meta.madx_file
+
+    @madx_file.setter
+    def madx_file(self, file):
+        self.meta.madx_file = file
 
     @property
     def line_file(self):
@@ -250,10 +241,10 @@ class DA:
 
     @line_file.setter
     def line_file(self, file):
-        self.meta.line_file = line_file
+        self.meta.line_file = file
 
     def load_line_from_file(self, file=None):
-        if self.line_file is not None and and self.line_file != -1 and file != self.line_file:
+        if self.line_file is not None and self.line_file != -1 and file != self.line_file:
             raise ValueError("Trying to load different line than the one specified in the metafile! " + \
                              "This is not allowed. If you want to remove the line from the metafile, " + \
                              "please do DA.line_file = None.")
@@ -282,6 +273,9 @@ class DA:
         if self.survival_data is not None:
             print("Warning: Initial conditions already exist! No generation done.")
             return
+
+        # Avoid writing to the meta at every property
+        self.meta._store_properties = False
 
         # If non-default values are specified, copy them to the metadata
         # In the grid generation further below, only the metadat values
@@ -333,62 +327,12 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
-        """Generate the initial conditions in a 2D random grid.
-        """
-        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
-        # Make the data
-        rng = default_rng()
-        if self.meta.nseeds > 0:
-            r = rng.uniform(low=0, high=r_max**2, size=num_part*self.meta.nseeds)
-            r = np.sqrt(r)
-            th = rng.uniform(low=0, high=2*np.pi, size=num_part*self.meta.nseeds)
-            x = r*np.cos(th)
-            y = r*np.sin(th)
-            seeds = np.repeat(np.arange(1,self.meta.nseeds+1), num_part)
-        else:
-            r = rng.uniform(low=0, high=r_max**2, size=num_part)
-            r = np.sqrt(r)
-            th = rng.uniform(low=0, high=2*np.pi, size=num_part)
-            x = r*np.cos(th)
-            y = r*np.sin(th)
-
-        # Make dataframe
-        self._surv = pd.DataFrame()
-        if self.meta.nseeds > 0:
-            self._surv['seed'] = seeds.astype(int)
-        self._surv['x_norm_in'] = x
-        self._surv['y_norm_in'] = y
-        self._surv['nturns'] = -1
-        self._surv['px_norm_in'] = px_norm
-        self._surv['py_norm_in'] = py_norm
-        self._surv['zeta_in'] = zeta
-        self._surv['delta_in'] = delta
-        self._surv['x_out'] = -1
-        self._surv['y_out'] = -1
-        self._surv['px_out'] = -1
-        self._surv['py_out'] = -1
-        self._surv['zeta_out'] = -1
-        self._surv['delta_out'] = -1
-        self._surv['s_out'] = -1
-        self._surv['state'] = 1
-        self._surv['submitted'] = False
-        self._surv['finished'] = False
-        self._create_pairs()
-        self.write_surv()
-        self.meta.da_type = 'monte_carlo'
-        self.meta.da_dim = 2
-        self.meta.r_max = r_max
-
-
-
-    # Not allowed on parallel process
     def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D polar grid.
         """
+
         self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
 
         # Make the grid in r
@@ -447,6 +391,64 @@ class DA:
         self.meta.da_type = 'radial'
         self.meta.da_dim = 2
         self.meta.r_max = r_max
+        self.meta.npart = len(self._surv.index)
+        self.meta._store()
+
+
+
+    # Not allowed on parallel process
+    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
+                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """Generate the initial conditions in a 2D random grid.
+        """
+
+        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+
+        # Make the data
+        rng = default_rng()
+        if self.meta.nseeds > 0:
+            r = rng.uniform(low=0, high=r_max**2, size=num_part*self.meta.nseeds)
+            r = np.sqrt(r)
+            th = rng.uniform(low=0, high=2*np.pi, size=num_part*self.meta.nseeds)
+            x = r*np.cos(th)
+            y = r*np.sin(th)
+            seeds = np.repeat(np.arange(1,self.meta.nseeds+1), num_part)
+        else:
+            r = rng.uniform(low=0, high=r_max**2, size=num_part)
+            r = np.sqrt(r)
+            th = rng.uniform(low=0, high=2*np.pi, size=num_part)
+            x = r*np.cos(th)
+            y = r*np.sin(th)
+
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['nturns'] = -1
+        self._surv['px_norm_in'] = px_norm
+        self._surv['py_norm_in'] = py_norm
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
+        self.write_surv()
+        self.meta.da_type = 'monte_carlo'
+        self.meta.da_dim = 2
+        self.meta.r_max = r_max
+        self.meta.npart = len(self._surv.index)
+        self.meta._store()
+
 
 
     # Not allowed on parallel process
@@ -599,19 +601,138 @@ class DA:
         self.write_surv()
 
 
+
     # =================================================================
-    # ========================= Calculate DA ==========================
+    # =================== create line from MAD-X ======================
     # =================================================================
 
+    # Allowed on parallel process
+    def build_line_from_madx(self, sequence, *, file=None, apertures=False, errors=True, \
+                             mass=xp.PROTON_MASS_EV, store_line=True, seeds=None, run_all_seeds=False):
+        # seeds=None  ->  find seed automatically (on parallel process)
+        from cpymad.madx import Madx
+        if file is None: 
+            if self.madx_file is None:
+                raise ValueError("No MAD-X file specified in arguments nor in metadata. Cannot build line.")
+        else:
+            if self.madx_file is None:
+                self.madx_file = file
+            elif self.madx_file != file:
+                self.madx_file = file
+                print("Warning: MAD-X file specified in arguments does not match with metadata. " + \
+                      "Used the former and updated the metadata.")
 
-    # Not allowed on parallel process
-    def calculate_da(self):
-        if da_type == 'radial':
-            pass
-        elif da_type == 'grid':
-            pass
-        elif da_type in ['monte_carlo', 'free']:
-            pass # ML
+        if store_line and self.line_file is None:
+            self.line_file = self.madx_file.parent / (self.madx_file.stem + '.line.json')
+        if store_line and self.line_file.exists():
+            print(f"Warning: line_file {self.line_file} exists and will be overwritten.")
+
+        # Find which seeds to run, and initialise line file if it is to be stored
+        if self.meta.nseeds == 0:
+            seeds = [ None ]
+        else:
+            self._line = {}
+            if run_all_seeds:
+                if seeds is not None:
+                    raise ValueError("Cannot have run_all_seeds=True and seed!=None. Choose one.")
+                seeds = range(1, self.meta.nseeds+1)
+                print("Calculating the line from MAD-X for all available seeds. Make sure this is not ran on " + \
+                      "a parallel process, as results might be unpredictable and probably wrong.")
+                if store_line:
+                    with ProtectFile(self.line_file, 'w') as pf:
+                        data = {seed: 'Running MAD-X' for seed in seeds}
+                        json.dump(data, pf, cls=xo.JEncoder, indent=True)
+            elif seeds is not None:
+                if not hasattr(seeds, '__iter__'):
+                    seeds = [ seeds ]
+                print(f"Processing seeds {seeds}.")
+                if store_line:
+                    created = False
+                    if not self.line_file.exists():
+                        try:
+                        # Hack to make it thread-safe
+                            with open(self.line_file, 'x') as fid:
+                            # Important: This cannot be a ProtectFile because of the underlying logic for creating files
+                            # TODO: at least I think so; maybe it works, to be checked
+                                data = {seed: 'Running MAD-X' for seed in seed}
+                                json.dump(data, fid, cls=xo.JEncoder, indent=True)
+                            created = True
+                        except FileExistsError:
+                            pass
+                    if not created:
+                        with ProtectFile(self.line_file, 'r+') as pf:
+                            data = json.load(pf)
+                            for seed in seeds:
+                                data[seed] = 'Running MAD-X'
+                            pf.truncate(0)  # Delete file contents (to avoid appending)
+                            pf.seek(0)      # Move file pointer to start of file
+                            json.dump(data, pf, cls=xo.JEncoder, indent=True)
+            else:
+            # Automatically find a seed that is not ran yet
+                if not store_line:
+                    raise ValueError("Cannot determine seed automatically (run_all_seeds=False and seed=None) " + \
+                                     "if store_line=False, as the line file is needed to find seeds for which " + \
+                                     "the MAD-X calculation isn't yet performed.")
+                created = False
+                if not self.line_file.exists():
+                    try:
+                    # Hack to make it thread-safe
+                        with open(self.line_file, 'x') as fid:
+                        # Important: This cannot be a ProtectFile because of the underlying logic for creating files
+                        # TODO: at least I think so; maybe it works, to be checked
+                            seed = 1
+                            data = {seed: 'Running MAD-X'}
+                            json.dump(data, fid, cls=xo.JEncoder, indent=True)
+                        created = True
+                    except FileExistsError:
+                        pass
+                if not created:
+                    with ProtectFile(self.line_file, 'r+') as pf:
+                        data = json.load(pf)
+                        seed = len(data.keys()) + 1
+                        data[seed] = 'Running MAD-X'
+                        pf.truncate(0)  # Delete file contents (to avoid appending)
+                        pf.seek(0)      # Move file pointer to start of file
+                        json.dump(data, pf, cls=xo.JEncoder, indent=True)
+                print(f"Processing seed {seed}.")
+                seeds = [ seed ]
+
+        # Run MAD-X
+        for seed in seeds:
+            if seed is None:
+                madin = self.madx_file
+                madout = self.madx_file.parent / (self.madx_file.stem + '.madx.out')
+            else:
+                madin = self.madx_file.parent / (self.madx_file.stem + '.' + str(seed) + '.madx')
+                madout = self.madx_file.parent / (self.madx_file.stem + '.' + str(seed) + '.madx.out')
+                with ProtectFile(self.madx_file, 'r') as fin:
+                    data = fin.read()
+                    with ProtectFile(madin, 'w') as fout:
+                        fout.write(data.replace('%SEEDRAN', str(seed)))
+            with ProtectFile(madout, 'w') as pf:
+                print("Running MAD-X")
+                mad = Madx(stdout=pf)
+                mad.call(madin.as_posix())
+            line = xt.Line.from_madx_sequence(mad.sequence[sequence], apply_madx_errors=errors, \
+                                              install_apertures=apertures)
+            line.particle_ref = xp.Particles(mass0=mass, gamma0=mad.sequence[sequence].beam.gamma)
+
+            # Save result
+            if seed is None:
+                self._line = line
+                if store_line:
+                    with ProtectFile(self.line_file, 'w') as pf:
+                        json.dump(self.line.to_dict(), pf, cls=xo.JEncoder, indent=True)
+            else:
+                self._line[seed] = line
+                if store_line:
+                    with ProtectFile(self.line_file, 'r+') as pf:
+                        data = json.load(pf)
+                        data[seed] = line
+                        pf.truncate(0)  # Delete file contents (to avoid appending)
+                        pf.seek(0)      # Move file pointer to start of file
+                        json.dump(data.to_dict(), pf, cls=xo.JEncoder, indent=True)
+
 
 
     # =================================================================
@@ -704,6 +825,60 @@ class DA:
             mask = self._surv['finished'] == False
             self._surv.loc[mask, 'submitted'] = False
             self.write_surv(pf)
+
+    # TODO: need to test
+    def reset_survival_output(self, mask=None, mask_by=None, mask_func=None):
+        if mask is None:
+            if mask_by is None:
+                if mask_func is None:
+                    mask = slice(None,None,None)
+                else:
+                    raise ValueError("Cannot use 'mask_func' without 'mask_by'!")
+            else:
+                if mask_func is None:
+                    raise ValueError("Need to use 'mask_func' when using 'mask_by'!")
+        elif mask_by is not None or mask_func is not None:
+            raise ValueError("Have to choose between using 'mask=..', or 'mask_by=..' and 'mask_func=..'!")
+
+        def _reset_surv(mask):
+            self._surv.loc[mask, 'x_out'] = -1
+            self._surv.loc[mask, 'y_out'] = -1
+            self._surv.loc[mask, 'px_out'] = -1
+            self._surv.loc[mask, 'py_out'] = -1
+            self._surv.loc[mask, 'zeta_out'] = -1
+            self._surv.loc[mask, 'delta_out'] = -1
+            self._surv.loc[mask, 's_out'] = -1
+            self._surv.loc[mask, 'nturns'] = -1
+            self._surv.loc[mask, 'state'] = 1
+            self._surv.loc[mask, 'submitted'] = False
+            self._surv.loc[mask, 'finished'] = False
+
+        if self.surv_exists():
+            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                self.read_surv(pf)
+                if mask is None:
+                    mask = mask_func(self._surv[mask_by])
+                _reset_surv(mask)
+                self.write_surv(pf)
+        elif self._surv is not None:
+            if mask is None:
+                mask = mask_func(self._surv[mask_by])
+            _reset_surv(mask)
+
+
+    # =================================================================
+    # ========================= Calculate DA ==========================
+    # =================================================================
+
+
+    # Not allowed on parallel process
+    def calculate_da(self):
+        if da_type == 'radial':
+            pass
+        elif da_type == 'grid':
+            pass
+        elif da_type in ['monte_carlo', 'free']:
+            pass # ML
 
 
     # =================================================================
@@ -806,8 +981,11 @@ class DA:
     # ======================= Database handling =======================
     # =================================================================
 
+    def surv_exists(self):
+        return self.meta._use_files and self.meta.surv_file.exists()
+
     def read_surv(self, pf=None):
-        if self.meta._use_files:
+        if self.surv_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
                     with ProtectFile(self.meta.surv_file, 'rb', wait=_db_access_wait_time) as pf:
@@ -816,6 +994,8 @@ class DA:
                     self._surv = pd.read_parquet(pf, engine="pyarrow")
             else:
                 raise NotImplementedError
+        else:
+            return None
 
     def write_surv(self, pf=None):
         if self.meta._use_files:
@@ -830,8 +1010,11 @@ class DA:
             else:
                 raise NotImplementedError
 
+    def da_exists(self):
+        return self.meta._use_files and self.meta.da_file.exists()
+
     def read_da(self, pf=None):
-        if self.meta._use_files:
+        if self.da_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
                     with ProtectFile(self.meta.da_file, 'rb', wait=_db_access_wait_time) as pf:
@@ -840,6 +1023,8 @@ class DA:
                     self._da = pd.read_parquet(pf, engine="pyarrow")
             else:
                 raise NotImplementedError
+        else:
+            return None
 
     def write_da(self, pf=None):
         if self.meta._use_files:
@@ -854,8 +1039,11 @@ class DA:
             else:
                 raise NotImplementedError
 
+    def da_evol_exists(self):
+        return self.meta._use_files and self.meta.da_evol_file.exists()
+
     def read_da_evol(self, pf=None):
-        if self.meta._use_files:
+        if self.da_evol_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
                     with ProtectFile(self.meta.da_evol_file, 'rb', wait=_db_access_wait_time) as pf:
@@ -864,6 +1052,8 @@ class DA:
                     self._da_evol = pd.read_parquet(pf, engine="pyarrow")
             else:
                 raise NotImplementedError
+        else:
+            return None
 
     def write_da_evol(self, pf=None):
         if self.meta._use_files:

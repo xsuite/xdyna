@@ -12,10 +12,10 @@ from .protectfile import ProtectFile
 
 # Developers: if a new metadata field is added, the following steps have to be implemented:
 #    - description in docstring
-#    - give default in DAMetaData._defaults
-#    - @property setter and getter
 #    - added to _fields
+#    - give default in DAMetaData._defaults
 #    - potential initialisation in DA
+#    - @property setter and getter
 
 # TODO: missing particle selection ...   =>  ?
 # TODO: do not use optional fields!?
@@ -71,6 +71,8 @@ class _DAMetaData:
         The minimum number of turns to use for DA recognition.
     max_turns : int
         The maximum number of turns to track.
+    npart : int
+        The number of particles to track.
     energy : float
         The energy of the beam.
     nseeds : int
@@ -86,6 +88,8 @@ class _DAMetaData:
         The longitudinal position of the initial conditions in the lattice.
     meta_file : pathlib.Path
         Path to the metadata file (*.meta.json)
+    madx_file : pathlib.Path
+        Path to the madx file (*.madx)
     line_file : pathlib.Path
         Path to the xtrack line file (*.line.json)
     db_extension : str
@@ -115,10 +119,10 @@ class _DAMetaData:
     # _auto_fields are calculated automatically and do not need to be read in
 #    # _optional_fields will not be stored to the json if their value is None
     
-    _fields = ['name','path','da_type','da_dim','emitx','emity','min_turns','max_turns','energy','nseeds','r_max',\
-               'pairs_shift','pairs_shift_var','s_start','meta_file','line_file','db_extension','surv_file','da_file',\
-               'da_evol_file','submissions']
-    _path_fields = ['path','meta_file','line_file','surv_file','da_file','da_evol_file']
+    _fields = ['name','path','da_type','da_dim','emitx','emity','min_turns','max_turns','npart','energy','nseeds',\
+               'r_max','pairs_shift','pairs_shift_var','s_start','meta_file','madx_file','line_file','db_extension',\
+               'surv_file','da_file','da_evol_file','submissions']
+    _path_fields = ['path','meta_file','madx_file','line_file','surv_file','da_file','da_evol_file']
     _auto_fields = ['name','path','meta_file','surv_file','da_file','da_evol_file']
 #     _optional_fields = []  # these default to None
     # used to specify the accepted DA types
@@ -133,6 +137,7 @@ class _DAMetaData:
         'emity':           None,
         'min_turns':       None,
         'max_turns':       None,
+        'npart':           None,
         'r_max':           None,
         'energy':          None,
         'nseeds':          0,
@@ -141,6 +146,7 @@ class _DAMetaData:
         's_start':         0,
         'submissions':     {},
         'line_file':       None,
+        'madx_file':       None,
         'db_extension':    'parquet'
     } #| { field: None for field in _optional_fields}
 
@@ -149,10 +155,10 @@ class _DAMetaData:
         # Remove .meta.json suffix if passed with filename
         if name.split('.')[-2:] == ['meta', 'json']:
             name = name[:-10]
-        self._name           = name
-        self._use_files      = use_files
-        self.path            = path
-        self._ready_to_store = True
+        self._name             = name
+        self._use_files        = use_files
+        self.path              = path
+        self._store_properties = True
 
         # Initialise defaults
         for field in self._defaults:
@@ -189,6 +195,15 @@ class _DAMetaData:
         return Path(self.path, self.name + '.meta.json').resolve() if self._use_files else None
 
     @property
+    def madx_file(self):
+        return self._madx_file
+
+    @madx_file.setter
+    def madx_file(self, madx_file):
+        madx_file = Path(madx_file).resolve()
+        self._set_property('madx_file', madx_file)
+
+    @property
     def line_file(self):
         return self._line_file
 
@@ -218,7 +233,7 @@ class _DAMetaData:
     def db_extension(self, db_extension):
         if db_extension != self.db_extension:
             if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
-                raise NotImplementedError('DataFrame currently in different format! Need to translate..")
+                raise NotImplementedError("DataFrame currently in different format! Need to translate..")
             if not db_extension in self._db_extensions:
                 raise ValueError(f"The variable db_extension should be one of {', '.join(self._db_extensions)}!")
             if db_extension =='db' or db_extension=='hdfs':
@@ -288,7 +303,7 @@ class _DAMetaData:
     @min_turns.setter
     def min_turns(self, min_turns):
         if not isinstance(min_turns, numbers.Number) and min_turns is not None:
-            raise ValueError(f"The value of min_turns should be a number, or None!")
+            raise ValueError(f"The value of min_turns should be a number or None!")
         min_turns = round(min_turns) if min_turns is not None else None
         self._set_property('min_turns', min_turns)
         
@@ -301,6 +316,17 @@ class _DAMetaData:
         if not isinstance(max_turns, numbers.Number):
             raise ValueError(f"The value of max_turns should be a number!")
         self._set_property('max_turns', round(max_turns))
+
+    @property
+    def npart(self):
+        return self._npart
+
+    @npart.setter
+    def npart(self, npart):
+        if not isinstance(npart, numbers.Number) and npart is not None:
+            raise ValueError(f"The value of npart should be a number or None!")
+        npart = round(npart) if npart is not None else None
+        self._set_property('npart', npart)
 
     @property
     def energy(self):
@@ -390,29 +416,30 @@ class _DAMetaData:
     def _set_property(self, prop, val):
         if getattr(self, '_' + prop) != val:
             setattr(self, '_' + prop, val)
-            if self._ready_to_store:
+            if self._store_properties:
                 self._check_not_changed_and_store(ignore=[prop])
     
     def _check_not_changed_and_store(self, ignore=[]):
-        # Create dict of self fields, ignoring the field that is expected to change
-#         # Also ignore optional keys that are not set
-#         ignore += [ x for x in self._optional_fields if getattr(self, x) is None ]
-        sortkeys = [ x for x in self._fields if x not in ignore ]
-        thisdict = { key: getattr(self, key) for key in sortkeys }
-        # Special treatment for paths: make them strings
-        self._paths_to_strings(thisdict, ignore)
-        # Load file
-        with ProtectFile(self.meta_file, 'r+') as pf:
-            meta = json.load(pf)
-            meta = { key: meta[key] for key in sortkeys }
-            # Compare
-            if meta != thisdict:
-                raise Exception("The metadata file changed on disk!\n" \
-                               + "This is not supposed to happen, and probably means that one of the child processes " \
-                               + "tried to write to it (which is only allowed for the 'submissions' field).\n" \
-                               + "Please check your workflow.")
-            else:
-                self._store(pf=pf)
+        if self._use_files:
+            # Create dict of self fields, ignoring the field that is expected to change
+#             # Also ignore optional keys that are not set
+#             ignore += [ x for x in self._optional_fields if getattr(self, x) is None ]
+            sortkeys = [ x for x in self._fields if x not in ignore ]
+            thisdict = { key: getattr(self, key) for key in sortkeys }
+            # Special treatment for paths: make them strings
+            self._paths_to_strings(thisdict, ignore)
+            # Load file
+            with ProtectFile(self.meta_file, 'r+') as pf:
+                meta = json.load(pf)
+                meta = { key: meta[key] for key in sortkeys }
+                # Compare
+                if meta != thisdict:
+                    raise Exception("The metadata file changed on disk!\n" \
+                                   + "This is not supposed to happen, and probably means that one of the child processes " \
+                                   + "tried to write to it (which is only allowed for the 'submissions' field).\n" \
+                                   + "Please check your workflow.")
+                else:
+                    self._store(pf=pf)
 
     def _read(self):
         if self._use_files:
@@ -443,6 +470,7 @@ class _DAMetaData:
                     self._store(pf=pf)
 
     def _store(self, pf=None):
+        self._store_properties = True
         if self._use_files:
 #             # Store everything except the optional fields that are None
 #             ignore = [ x for x in self._optional_fields if getattr(self, x) is None ]
@@ -463,7 +491,8 @@ class _DAMetaData:
                 json.dump(meta, pf, indent=2, sort_keys=False)
     
     def _paths_to_strings(self, meta, ignore=[]):
-        meta.update({'line_file': 'line manually added' if meta['line_file'] == -1 else meta['line_file']})
+        if 'line_file' not in ignore:
+            meta.update({'line_file': 'line manually added' if meta['line_file'] == -1 else meta['line_file']})
         meta.update({
             key: getattr(self,key).as_posix() if getattr(self,key) is not None else None
             for key in self._path_fields if key not in ignore
