@@ -592,7 +592,7 @@ class DA:
         df_new['state'] = 1
         df_new['submitted'] = False
         df_new['finished'] = False
-#         self._create_pairs()   # Needs to only act on non-finished particles ...        
+#         self._create_pairs()   # Needs to only act on non-finished particles ...
         self._surv = pd.concat([
                             self._surv,
                             df_new
