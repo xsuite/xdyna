@@ -337,18 +337,18 @@ class DA:
         self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
 
         # Make the grid in xy
-        def check_options(coord_min, coord_max, coord_step, coord_num):
+        def check_options(coord_min, coord_max, coord_step, coord_num, plane):
             if coord_step is None and coord_num is None:
-                raise ValueError(f"Specify at least 'step' or 'num'.")
+                raise ValueError(f"Specify at least '{plane}_step' or '{plane}_num'.")
             elif coord_step is not None and coord_num is not None:
-                raise ValueError(f"Use only one of 'step' and 'num', not both.")
+                raise ValueError(f"Use only one of '{plane}_step' and '{plane}_num', not both.")
             elif coord_step is not None:
                 coord_num = floor( (coord_max-coord_min) / coord_step ) + 1
                 coord_max = coord_min + (coord_num-1) * coord_step
             return coord_min, coord_max, coord_num
 
-        x_min, x_max, x_num = check_options(x_min, x_max, x_step, x_num)
-        y_min, y_max, y_num = check_options(y_min, y_max, y_step, y_num)
+        x_min, x_max, x_num = check_options(x_min, x_max, x_step, x_num, 'x')
+        y_min, y_max, y_num = check_options(y_min, y_max, y_step, y_num, 'y')
 
         x_space = np.linspace(x_min, x_max, x_num)
         y_space = np.linspace(y_min, y_max, y_num)
@@ -405,9 +405,9 @@ class DA:
 
         # Make the grid in r
         if r_step is None and r_num is None:
-            raise ValueError(f"Specify at least 'r_step' or 'r_num'.")
+            raise ValueError("Specify at least 'r_step' or 'r_num'.")
         elif r_step is not None and r_num is not None:
-            raise ValueError(f"Use only one of 'r_step' and 'r_num', not both.")
+            raise ValueError("Use only one of 'r_step' and 'r_num', not both.")
         elif r_step is not None:
             r_num = floor( (r_max-r_min) / r_step ) + 1
             r_max = r_min + (r_num-1) * r_step
@@ -569,7 +569,7 @@ class DA:
 
         # TODO: catch when border tells us that not enough samples are available and larger r or larger Nmin is needed
 
-        print(f"Generating samples... ", end='')
+        print("Generating samples... ", end='')
         # First we create a 'pool' of samples that contains 100 times as many particles as wished.
         # This is to get a reliable distribution to select from later.
         # We make this pool by sampling a uniform ring, from the inner circle of the max_border (with bleed)
@@ -821,7 +821,7 @@ class DA:
         # Build tracker(s) if not yet done
         if self.meta.nseeds == 0:
             if self.line.tracker is None:
-                print(f"Building tracker.")
+                print("Building tracker.")
                 self.line.build_tracker()
         else:
             if 0 in self.line.keys():
