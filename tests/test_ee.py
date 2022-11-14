@@ -1,19 +1,18 @@
 import json
 from pathlib import Path
-import numpy as np
+import pytest
 import xobjects as xo
 import xtrack as xt
 import xpart as xp
-import xdyna as xd 
+import xdyna as xd
 
 ENERGY = {'t': 182.5, 'z': 45.6}
 EMITTANCE = {'t': {'X':1.46e-9, 'Y':2.9e-12, 'Z': 1.0}, 'z': {'X':0.71e-9, 'Y':1.42e-12, 'Z': 1.0}}
 TURNS = {'t': 45, 'z': 2500}
 TEST_DIR = Path(__file__).resolve().parent
 
-
-def test_simple_radial():
-    mode = 't'
+@pytest.mark.parametrize("mode", ['t']) # use t mode for now, since z takes quite long
+def test_simple_radial(mode):
     with open(TEST_DIR/'input'/'tapered_t_b1_thin.json', 'r', encoding='utf-8') as fid:
         loaded_dct = json.load(fid)
     line = xt.Line.from_dict(loaded_dct)
