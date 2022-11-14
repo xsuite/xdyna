@@ -30,6 +30,6 @@ def test_simple_radial(mode):
                max_turns=TURNS[mode],
                min_turns=0,
                use_files=False)
-    DA.generate_initial_radial(angles=5, r_min=2, r_max=20, r_step=1., delta=0.000)
+    DA.generate_initial_radial(angles=5, r_min=2, r_max=20, r_step=2., delta=0.000)
     DA.line = line
     DA.track_job()

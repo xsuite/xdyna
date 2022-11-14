@@ -4,7 +4,15 @@ This package is an attempt to make file reading/writing (possibly concurrent) mo
 Last update 10/11/2022 - F.F. Van der Veken
 """
 
-import io, shutil, time, pathlib, tempfile, datetime, atexit, hashlib, random
+import atexit
+import datetime
+import hashlib
+import io
+import pathlib
+import random
+import shutil
+import tempfile
+import time
 
 tempdir = tempfile.TemporaryDirectory()
 protected_open = {}

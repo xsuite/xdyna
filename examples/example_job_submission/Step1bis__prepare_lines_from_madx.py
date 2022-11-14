@@ -1,5 +1,6 @@
-import xdyna as xd
+import sys
 from pathlib import Path
+import xdyna as xd
 
 # This is an example for a DA study with 60 seeds to be ran on a cluster.
 # =======================================================================
