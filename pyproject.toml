@@ -11,6 +11,9 @@ include = [ "LICENSE", "NOTICE" ]
 
 [tool.poetry.dependencies]
 python = ">=3.8"
+scipy = ">=1.9.3"
+pandas = ">=1.5.1"
+
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"

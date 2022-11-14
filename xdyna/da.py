@@ -1,15 +1,14 @@
-from scipy import interpolate, integrate
-# from scipy.constants import c as clight
 from math import floor
-import numpy as np
-from numpy.random import default_rng
-import pandas as pd
-
 from pathlib import Path
 import json
 import datetime
-import os
 import time
+
+from scipy import interpolate, integrate
+# from scipy.constants import c as clight
+import numpy as np
+from numpy.random import default_rng
+import pandas as pd
 
 import xobjects as xo
 import xtrack as xt
@@ -466,7 +465,7 @@ class DA:
             if self.meta.min_turns is None:
                 self.meta.min_turns = 20
         else:
-            if self.meta.min_turns is not None and self.meta.min_turns != turns:
+            if self.meta.min_turns is not None and self.meta.min_turns != min_turns:
                 # TODO: This should only be checked if we already re-sampled.
                 # There is no harm by changing min_turns after the initial run
                 print(f"Warning: 'min_turns' can be set only once (and is already set to {self.meta.min_turns}). "
@@ -777,12 +776,10 @@ class DA:
                           scale_with_transverse_norm_emitt=self.emittance
                          )
         # Track
-        if logging:
-            self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.')
+        self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)
         self.line.tracker.track(particles=part, num_turns=self.meta.max_turns)
         context.synchronize()
-        if logging:
-            self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.')
+        self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.', logging=logging)
 
         # Store results
         part_id   = context.nparray_from_context_array(part.particle_id)
@@ -811,11 +808,10 @@ class DA:
             self._surv.loc[part_ids, 'state'] = state
             self.write_surv(pf)
 
-        if logging:
-            self._update_job_log({
-                'finished_time': datetime.datetime.now().isoformat(),
-                'status': 'Finished'
-            })
+        self._update_job_log({
+            'finished_time': datetime.datetime.now().isoformat(),
+            'status': 'Finished'
+        }, logging=logging)
 
 
     # NOT allowed on parallel process!
@@ -873,11 +869,11 @@ class DA:
 
     # Not allowed on parallel process
     def calculate_da(self):
-        if da_type == 'radial':
+        if self.da_type == 'radial':
             pass
-        elif da_type == 'grid':
+        elif self.da_type == 'grid':
             pass
-        elif da_type in ['monte_carlo', 'free']:
+        elif self.da_type in ['monte_carlo', 'free']:
             pass # ML
 
 
@@ -950,31 +946,30 @@ class DA:
 
 
     # Allowed on parallel process
-    def _update_job_log(self, update):
+    def _update_job_log(self, update, logging=True):
         if logging:
             self._active_job_log.update(update)
             self.meta.update_submissions(self._active_job, self._active_job_log)
 
     # Allowed on parallel process
-    def _append_job_log(self, key, update):
+    def _append_job_log(self, key, update, logging=True):
         if logging:
             self._active_job_log[key].append(update)
             self.meta.update_submissions(self._active_job, self._active_job_log)
 
     # Allowed on parallel process
-    def _warn_job(self, warntext):
-        if logging:
-            self._append_job_log('warnings', warntext)
+    def _warn_job(self, warntext, logging=True):
+        self._append_job_log('warnings', warntext, logging=logging)
         print(warntext)
 
     # Allowed on parallel process
-    def _fail_job(self, failtext):
-        if logging:
-            self._update_job_log({
-                'finished_time': datetime.datetime.now().isoformat(),
-                'status': 'Failed: ' + failtext
-            })
+    def _fail_job(self, failtext, logging=True):
+        self._update_job_log({
+            'finished_time': datetime.datetime.now().isoformat(),
+            'status': 'Failed: ' + failtext
+        }, logging=logging)
         raise Exception(failtext)
+
 
 
     # =================================================================
