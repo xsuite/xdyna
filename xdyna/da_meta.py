@@ -491,9 +491,14 @@ class _DAMetaData:
                 json.dump(meta, pf, indent=2, sort_keys=False)
     
     def _paths_to_strings(self, meta, ignore=[]):
-        if 'line_file' not in ignore:
-            meta.update({'line_file': 'line manually added' if meta['line_file'] == -1 else meta['line_file']})
-        meta.update({
-            key: getattr(self,key).as_posix() if getattr(self,key) is not None else None
-            for key in self._path_fields if key not in ignore
-        })
+        update_dict = {}
+        for key in self._path_fields:
+            if key not in ignore:
+                if getattr(self,key) is not None:
+                    if key == 'line_file' and getattr(self,key) == -1:
+                        update_dict[key] = 'line manually added'
+                    else:
+                        update_dict[key] = getattr(self,key).as_posix()
+                else:
+                    update_dict[key] = None
+        meta.update(update_dict)
