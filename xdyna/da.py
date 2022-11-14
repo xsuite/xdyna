@@ -257,10 +257,10 @@ class DA:
                 return
             else:
                 file = self.line_file
-        self.line_file = file
         with ProtectFile(file, 'r') as pf:
             line = json.load(pf)
         self.line = line
+        self.line_file = file
 
 
 
@@ -745,7 +745,9 @@ class DA:
             raise Exception("Need to load line first!")
             
         # Create a job: get job ID and start logging
-        part_ids, seeds = self._create_job(npart, logging, force_single_seed_per_job)
+        part_ids, seeds, flag = self._create_job(npart, logging, force_single_seed_per_job)
+        if flag != 0:
+            return
         job_id = str(self._active_job)
 
         # Build tracker(s) if not yet done
@@ -797,8 +799,21 @@ class DA:
         s_out     = context.nparray_from_context_array(part.s)[sort]
         state     = context.nparray_from_context_array(part.state)[sort]
 
-        with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
-            self.read_surv(pf)
+        if self.surv_exists():
+            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                self.read_surv(pf)
+                self._surv.loc[part_ids, 'finished'] = True
+                self._surv.loc[part_ids, 'x_out'] = x_out
+                self._surv.loc[part_ids, 'y_out'] = y_out
+                self._surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
+                self._surv.loc[part_ids, 'px_out'] = px_out
+                self._surv.loc[part_ids, 'py_out'] = py_out
+                self._surv.loc[part_ids, 'zeta_out'] = zeta_out
+                self._surv.loc[part_ids, 'delta_out'] = delta_out
+                self._surv.loc[part_ids, 's_out'] = s_out
+                self._surv.loc[part_ids, 'state'] = state
+                self.write_surv(pf)
+        else:
             self._surv.loc[part_ids, 'finished'] = True
             self._surv.loc[part_ids, 'x_out'] = x_out
             self._surv.loc[part_ids, 'y_out'] = y_out
@@ -808,8 +823,6 @@ class DA:
             self._surv.loc[part_ids, 'zeta_out'] = zeta_out
             self._surv.loc[part_ids, 'delta_out'] = delta_out
             self._surv.loc[part_ids, 's_out'] = s_out
-            self._surv.loc[part_ids, 'state'] = state
-            self.write_surv(pf)
 
         if logging:
             self._update_job_log({
@@ -820,11 +833,14 @@ class DA:
 
     # NOT allowed on parallel process!
     def resubmit_unfinished(self):
-        with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
-            self.read_surv(pf)
-            mask = self._surv['finished'] == False
-            self._surv.loc[mask, 'submitted'] = False
-            self.write_surv(pf)
+        if self.surv_exists():
+            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                self.read_surv(pf)
+                mask = self._surv['finished'] == False
+                self._surv.loc[mask, 'submitted'] = False
+                self.write_surv(pf)
+        else:
+            print("No survival file found! Nothing done.")
 
     # TODO: need to test
     def reset_survival_output(self, mask=None, mask_by=None, mask_func=None):
@@ -887,23 +903,7 @@ class DA:
 
     # Allowed on parallel process
     def _create_job(self, npart=None, logging=True, force_single_seed_per_job=None):
-        # Get job ID
-        self._active_job = self.meta.new_submission_id() if logging else None
-
-        if npart is None:
-            # If tracking all particles, default to all seeds as well
-            if force_single_seed_per_job is None:
-                force_single_seed_per_job = False
-            txt = ' over all seeds' if self.meta.nseeds > 0 and not force_single_seed_per_job else ''
-            print(f"Tracking all available particles{txt}. Make sure this is not ran on a parallel process, " + \
-                   "as results might be unpredictable and probably wrong.")
-        else:
-            force_single_seed_per_job = True if force_single_seed_per_job is None else force_single_seed_per_job
-
-        with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
-            # Get the first npart particle IDs that are not yet submitted
-            # TODO: this can probably be optimised by only reading last column
-            self.read_surv(pf)
+        def _get_seeds_and_stuff(npart, logging):
             mask = self._surv['submitted'] == False
             if npart is None:
                 this_part_ids = self._surv[mask].index
@@ -922,30 +922,60 @@ class DA:
             # Quit the job if no particles need to be submitted
             if len(this_part_ids) == 0:
                 print("No more particles to submit! Exiting...")
-                # TODO: this doesn't work!
                 if logging:
                     # The submissions log for this job will only have a status field
                     self.meta.update_submissions(self._active_job, {'status': 'No submission needed.'})
-                exit()
+                return this_part_ids, seeds, -1
             # Otherwise, flag the particles as submitted, before releasing the file again
             self._surv.loc[this_part_ids, 'submitted'] = True
-            self.write_surv(pf)
-        # Reduce dataframe to only those particles in this job
-        self._surv = self._surv.loc[this_part_ids]
+            return this_part_ids, seeds, 0
 
-        # Submission info
-        if logging:
-            self._active_job_log = {
-                    'submission_time': datetime.datetime.now().isoformat(),
-                    'finished_time':   0,
-                    'status':          'Running',
-                    'tracking_turns':  self.meta.max_turns,
-                    'particle_ids':    '[' + ', '.join([str(pid) for pid in this_part_ids]) + ']',
-                    'seeds':           [ int(seed) for seed in seeds ] if seeds is not None else None,
-                    'warnings':        [],
-                    'output':          [],
-            }
-        return this_part_ids, seeds
+
+        # Get job ID
+        self._active_job = self.meta.new_submission_id() if logging else None
+
+        # Initialise force_single_seed_per_job
+        if npart is None:
+            # If tracking all particles, default to all seeds as well
+            if force_single_seed_per_job is None:
+                force_single_seed_per_job = False
+            txt = ' over all seeds' if self.meta.nseeds > 0 and not force_single_seed_per_job else ''
+            print(f"Tracking all available particles{txt}. Make sure this is not ran on a parallel process, " + \
+                   "as results might be unpredictable and probably wrong.")
+        else:
+            force_single_seed_per_job = True if force_single_seed_per_job is None else force_single_seed_per_job
+
+        # Get available particles
+        if self.surv_exists():
+            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                # Get the first npart particle IDs that are not yet submitted
+                # TODO: this can probably be optimised by only reading last column
+                self.read_surv(pf)
+                this_part_ids, seeds, flag = _get_seeds_and_stuff(npart, logging)
+                if flag == 0:
+                    self.write_surv(pf)
+        else:
+            this_part_ids, seeds, flag = _get_seeds_and_stuff(npart, logging)
+
+        # Prepare job
+        if flag == 0:
+            # Reduce dataframe to only those particles in this job
+            self._surv = self._surv.loc[this_part_ids]
+
+            # Submission info
+            if logging:
+                self._active_job_log = {
+                        'submission_time': datetime.datetime.now().isoformat(),
+                        'finished_time':   0,
+                        'status':          'Running',
+                        'tracking_turns':  self.meta.max_turns,
+                        'particle_ids':    '[' + ', '.join([str(pid) for pid in this_part_ids]) + ']',
+                        'seeds':           [ int(seed) for seed in seeds ] if seeds is not None else None,
+                        'warnings':        [],
+                        'output':          [],
+                }
+
+        return this_part_ids, seeds, flag
 
 
 
