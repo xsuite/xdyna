@@ -365,7 +365,7 @@ class DA:
         self._surv = pd.DataFrame()
         if self.meta.nseeds > 0:
             self._surv['seed'] = seeds.astype(int)
-        self._surv['ang_xy'] = np.tan(y/x)
+        self._surv['ang_xy'] = np.tan(y/x)*180/np.pi
         self._surv['r_xy'] = np.sqrt(x**2 + y**2)
         self._surv['nturns'] = -1
         self._surv['x_norm_in'] = x
