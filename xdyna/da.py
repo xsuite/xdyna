@@ -46,20 +46,23 @@ class DA:
         # Initialise metadata
         self._meta = _DAMetaData(name=name, path=path, use_files=use_files)
         self.meta._store_properties = False
-        self.meta.nseeds    = kwargs.get('nseeds', 0)
-        self.meta.max_turns = kwargs.get('max_turns')
-        min_turns           = kwargs.get('min_turns', None)
-        emittance           = kwargs.get('emittance', None)
-        energy              = kwargs.get('energy', None)
-        db_extension        = kwargs.get('db_extension', None)
-        if min_turns is not None:
-            self.meta.min_turns = min_turns
-        if emittance is not None:
-            self.update_emittance(emittance, update_surv=False)
-        if energy is not None:
-            self.meta.energy = energy
-        if db_extension is not None:
-            self.meta.db_extension = db_extension
+        self.meta.nseeds       = kwargs.get('nseeds',       _DAMetaData._defaults['nseeds'])
+        self.meta.max_turns    = kwargs.get('max_turns')
+        self.meta.min_turns    = kwargs.get('min_turns',    _DAMetaData._defaults['min_turns'])
+        self.meta.energy       = kwargs.get('energy',       _DAMetaData._defaults['energy'])
+        self.meta.db_extension = kwargs.get('db_extension', _DAMetaData._defaults['db_extension'])
+        nemitt_x               = kwargs.get('nemitt_x', None)
+        nemitt_y               = kwargs.get('nemitt_y', None)
+        normalised_emittance   = kwargs.get('normalised_emittance', None)
+        if normalised_emittance is not None:
+            if nemitt_x is not None or nemitt_y is not None:
+                raise ValueError("Use either normalised_emittance, or nemitt_x and nemitt_y.")
+            self.update_emittance(normalised_emittance, update_surv=False)
+        elif nemitt_x is not None or nemitt_y is not None:
+            if nemitt_x is not None and nemitt_y is not None:
+                self.update_emittance([nemitt_x, nemitt_y], update_surv=False)
+            else:
+                raise ValueError("Need both nemitt_x and nemitt_y.")
         self.meta._store()
 
         # Initialise DA data
@@ -152,34 +155,42 @@ class DA:
         self.reset_survival_output(mask_by='nturns', mask_func=(lambda x: x == self.meta.max_turns))
 
     @property
-    def emittance(self):
-        if self.meta.emitx is None or self.meta.emity is None:
+    def nemitt_x(self):
+        return self.meta.nemitt_x
+
+    @property
+    def nemitt_y(self):
+        return self.meta.nemitt_y
+
+    @property
+    def normalised_emittance(self):
+        if self.nemitt_x is None or self.nemitt_y is None:
             return None
         else:
-            return [self.meta.emitx, self.meta.emity]
+            return [self.nemitt_x, self.nemitt_y]
 
     # Not allowed on parallel process
     def update_emittance(self, emit, update_surv=True):
-        oldemittance = self.emittance
+        oldemittance = self.normalised_emittance
         if hasattr(emit, '__iter__'):
             if isinstance(emit, str):
                 raise ValueError(f"The emittance has to be a number!")
             elif len(emit) == 2:
-                self.meta.emitx = emit[0]
-                self.meta.emity = emit[1]
+                self.meta.nemitt_x = emit[0]
+                self.meta.nemitt_y = emit[1]
             elif len(emit) == 1:
-                self.meta.emitx = emit[0]
-                self.meta.emity = emit[0]
+                self.meta.nemitt_x = emit[0]
+                self.meta.nemitt_y = emit[0]
             else:
-                raise ValueError(f"The emittance must have one or two values (for emitx and emity)!")
+                raise ValueError(f"The emittance must have one or two values (for nemitt_x and nemitt_y)!")
         else:
-            self.meta.emitx = emit
-            self.meta.emity = emit
+            self.meta.nemitt_x = emit
+            self.meta.nemitt_y = emit
         # Recalculate initial conditions if set
-        if update_surv and self._surv is not None and oldemittance is not None and self.emittance != oldemittance:
+        if update_surv and self._surv is not None and oldemittance is not None and self.normalised_emittance != oldemittance:
             print("Updating emittance")
-            corr_x = np.sqrt( oldemittance[0] / self.meta.emitx )
-            corr_y = np.sqrt( oldemittance[1] / self.meta.emity )
+            corr_x = np.sqrt( oldemittance[0] / self.nemitt_x )
+            corr_y = np.sqrt( oldemittance[1] / self.nemitt_y )
             if self.surv_exists():
                 with ProtectFile(self.meta.surv_file, 'r+b') as pf:
                     self.read_surv(pf)
@@ -210,6 +221,7 @@ class DA:
             if self.meta.line_file == -1:
                 self.meta.line_file = None  # The line is no longer manually added
             self._line = None
+            self.meta.energy = None
         else:
             self.meta.line_file = -1  # Mark line as manually added
             self._line = line
@@ -217,11 +229,17 @@ class DA:
                 # No seeds, so self.line is just the line
                 if not isinstance(line, xt.Line):
                     self._line = xt.Line.from_dict(line)
+                self.meta.energy = self.line.particle_ref.p0c[0]
             else:
                 # Seeds, so line is a dict of lines
+                energy = []
                 for seed, this_line in line.items():
                     if not isinstance(this_line, xt.Line):
                         self._line[seed] = xt.Line.from_dict(this_line)
+                    energy = [ *energy, self._line[seed].particle_ref.p0c[0] ]
+                if len(np.unique([ round(e, 4) for e in energy])) != 1:
+                    raise ValueError(f"The lines for the different seeds have different energies: {energy}!")
+                self.meta.energy = energy[0]
 
     @property
     def madx_file(self):
@@ -267,7 +285,7 @@ class DA:
     # ================ Generation of intial conditions ================
     # =================================================================
 
-    def _prepare_generation(self, emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+    def _prepare_generation(self, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         # Does survival already exist?
         if self.survival_data is not None:
             print("Warning: Initial conditions already exist! No generation done.")
@@ -279,9 +297,9 @@ class DA:
         # If non-default values are specified, copy them to the metadata
         # In the grid generation further below, only the metadat values
         # should be used (and not the function ones)!
-        if emittance is not None:
-            self.emittance = emittance
-        if self.emittance is None:
+        if normalised_emittance is not None:
+            self.update_emittance(normalised_emittance, update_surv=False)
+        if self.normalised_emittance is None:
             raise ValueError("No emittance defined! Do this first before generating initial conditions")
         if nseeds is not None:
             self.meta.nseeds = nseeds
@@ -328,11 +346,11 @@ class DA:
     # Not allowed on parallel process
     def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D polar grid.
         """
 
-        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+        self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
         # Make the grid in r
         if r_step is None and r_num is None:
@@ -397,11 +415,11 @@ class DA:
 
     # Not allowed on parallel process
     def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
         """
 
-        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+        self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
         # Make the data
         rng = default_rng()
@@ -605,6 +623,7 @@ class DA:
     # =================== create line from MAD-X ======================
     # =================================================================
 
+    # TODO: can we get particle mass from mask??? Particle type??
     # Allowed on parallel process
     def build_line_from_madx(self, sequence, *, file=None, apertures=False, errors=True, \
                              mass=xp.PROTON_MASS_EV, store_line=True, seeds=None, run_all_seeds=False):
@@ -697,6 +716,7 @@ class DA:
                 seeds = [ seed ]
 
         # Run MAD-X
+        energy = []
         for seed in seeds:
             if seed is None:
                 madin = self.madx_file
@@ -715,6 +735,7 @@ class DA:
             line = xt.Line.from_madx_sequence(mad.sequence[sequence], apply_madx_errors=errors, \
                                               install_apertures=apertures)
             line.particle_ref = xp.Particles(mass0=mass, gamma0=mad.sequence[sequence].beam.gamma)
+            energy = [ *energy, line.particle_ref.p0c[0] ]
 
             # Save result
             if seed is None:
@@ -731,6 +752,9 @@ class DA:
                         pf.truncate(0)  # Delete file contents (to avoid appending)
                         pf.seek(0)      # Move file pointer to start of file
                         json.dump(data.to_dict(), pf, cls=xo.JEncoder, indent=True)
+        if len(np.unique([ round(e, 4) for e in energy])) != 1:
+            raise ValueError(f"The lines for the different seeds have different energies: {energy}!")
+        self.meta.energy = energy[0]
 
 
 
@@ -775,7 +799,7 @@ class DA:
         part = xp.build_particles(_context=context,
                           tracker=self.line.tracker,
                           x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
-                          scale_with_transverse_norm_emitt=self.emittance
+                          nemitt_x=self.nemitt_x, nemitt_y=self.nemitt_y
                          )
         # Track
         self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)

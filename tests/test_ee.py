@@ -26,10 +26,9 @@ def test_simple_radial(mode):
     tracker.matrix_stability_tol = 9e-1
 
     DA = xd.DA(name=f'fcc_ee_{mode}',
-               emittance=[EMITTANCE[mode]['X'], EMITTANCE[mode]['Y']],
+               normalised_emittance=[EMITTANCE[mode]['X'], EMITTANCE[mode]['Y']],
                max_turns=TURNS[mode],
-               min_turns=0,
                use_files=False)
-    DA.generate_initial_radial(angles=5, r_min=2, r_max=20, r_step=2., delta=0.000)
+    DA.generate_initial_radial(angles=1, r_min=2, r_max=20, r_step=4., delta=0.000)
     DA.line = line
     DA.track_job()

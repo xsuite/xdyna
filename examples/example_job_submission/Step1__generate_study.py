@@ -13,7 +13,7 @@ import xdyna as xd
 study = str(sys.argv[1])
 
 # This will instantiate a DA object, and store the metadata in a *.meta.json file
-DA = xd.DA(name=study, emittance=2.5e-6, max_turns=1e5, min_turns=20, use_files=True)
+DA = xd.DA(name=study, normalised_emittance=2.5e-6, max_turns=1e5, min_turns=20, use_files=True)
 
 # Generate the initial conditions on a polar grid.
 # This will store the particle coordinates in a common database file.

@@ -58,10 +58,10 @@ class _DAMetaData:
     da_dim : int
         The dimension of the DA. This is the number of dimensions over
         which the initial conditions are varied.
-    emitx : float
+    nemitt_x : float
         The horizontal emittance used to calculated the beam size which
         is used to calculate the initial conditions.
-    emity : float
+    nemitt_y : float
         The vertical emittance used to calculated the beam size which
         is used to calculate the initial conditions.
     r_max : float
@@ -119,7 +119,7 @@ class _DAMetaData:
     # _auto_fields are calculated automatically and do not need to be read in
 #    # _optional_fields will not be stored to the json if their value is None
     
-    _fields = ['name','path','da_type','da_dim','emitx','emity','min_turns','max_turns','npart','energy','nseeds',\
+    _fields = ['name','path','da_type','da_dim','nemitt_x','nemitt_y','min_turns','max_turns','npart','energy','nseeds',\
                'r_max','pairs_shift','pairs_shift_var','s_start','meta_file','madx_file','line_file','db_extension',\
                'surv_file','da_file','da_evol_file','submissions']
     _path_fields = ['path','meta_file','madx_file','line_file','surv_file','da_file','da_evol_file']
@@ -133,8 +133,8 @@ class _DAMetaData:
     _defaults = {
         'da_type':         None,
         'da_dim':          None,
-        'emitx':           None,
-        'emity':           None,
+        'nemitt_x':        None,
+        'nemitt_y':        None,
         'min_turns':       None,
         'max_turns':       None,
         'npart':           None,
@@ -231,7 +231,7 @@ class _DAMetaData:
 
     @db_extension.setter
     def db_extension(self, db_extension):
-        if db_extension != self.db_extension:
+        if self._use_files and db_extension != self.db_extension:
             if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
                 raise NotImplementedError("DataFrame currently in different format! Need to translate..")
             if not db_extension in self._db_extensions:
@@ -261,28 +261,28 @@ class _DAMetaData:
         self._set_property('da_dim', round(da_dim))
 
     @property
-    def emitx(self):
-        return self._emitx
+    def nemitt_x(self):
+        return self._nemitt_x
 
-    @emitx.setter
-    def emitx(self, emitx):
-        if not isinstance(emitx, numbers.Number):
+    @nemitt_x.setter
+    def nemitt_x(self, nemitt_x):
+        if not isinstance(nemitt_x, numbers.Number):
             raise ValueError(f"The emittance should be a number!")
-        if emitx <= 0:
+        if nemitt_x <= 0:
             raise ValueError(f"The emittance has to be larger than zero!")
-        self._set_property('emitx', emitx)
+        self._set_property('nemitt_x', nemitt_x)
 
     @property
-    def emity(self):
-        return self._emity
+    def nemitt_y(self):
+        return self._nemitt_y
 
-    @emity.setter
-    def emity(self, emity):
-        if not isinstance(emity, numbers.Number):
+    @nemitt_y.setter
+    def nemitt_y(self, nemitt_y):
+        if not isinstance(nemitt_y, numbers.Number):
             raise ValueError(f"The emittance should be a number!")
-        if emity <= 0:
+        if nemitt_y <= 0:
             raise ValueError(f"The emittance has to be larger than zero!")
-        self._set_property('emity', emity)
+        self._set_property('nemitt_y', nemitt_y)
 
     @property
     def r_max(self):
@@ -291,8 +291,8 @@ class _DAMetaData:
     @r_max.setter
     def r_max(self, r_max):
         if not isinstance(r_max, numbers.Number) and r_max is not None:
-            raise ValueError(f"The property r_max should be a number!")
-        if r_max <= 0 and r_max is not None:
+            raise ValueError(f"The property r_max should be a number or None!")
+        if r_max is not None and r_max <= 0:
             raise ValueError(f"The property r_max has to be larger than zero!")
         self._set_property('r_max', r_max)
 
@@ -304,6 +304,10 @@ class _DAMetaData:
     def min_turns(self, min_turns):
         if not isinstance(min_turns, numbers.Number) and min_turns is not None:
             raise ValueError(f"The value of min_turns should be a number or None!")
+        if min_turns == 0:
+            min_turns = None
+        if min_turns is not None and min_turns <= 0:
+            raise ValueError(f"The property min_turns has to be larger than zero!")
         min_turns = round(min_turns) if min_turns is not None else None
         self._set_property('min_turns', min_turns)
         
@@ -315,6 +319,8 @@ class _DAMetaData:
     def max_turns(self, max_turns):
         if not isinstance(max_turns, numbers.Number):
             raise ValueError(f"The value of max_turns should be a number!")
+        if max_turns <= 0:
+            raise ValueError(f"The property max_turns has to be larger than zero!")
         self._set_property('max_turns', round(max_turns))
 
     @property
@@ -325,6 +331,8 @@ class _DAMetaData:
     def npart(self, npart):
         if not isinstance(npart, numbers.Number) and npart is not None:
             raise ValueError(f"The value of npart should be a number or None!")
+        if npart is not None and npart <= 0:
+            raise ValueError(f"The property npart has to be larger than zero!")
         npart = round(npart) if npart is not None else None
         self._set_property('npart', npart)
 
@@ -334,9 +342,9 @@ class _DAMetaData:
 
     @energy.setter
     def energy(self, energy):
-        if not isinstance(energy, numbers.Number):
-            raise ValueError(f"The energy should be a number!")
-        if energy <= 0:
+        if not isinstance(energy, numbers.Number) and energy is not None:
+            raise ValueError(f"The energy should be a number or None!")
+        if energy is not None and energy <= 0:
             raise ValueError(f"The energy has to be larger than zero!")
         self._set_property('energy', energy)
 
