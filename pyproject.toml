@@ -11,10 +11,9 @@ include = [ "LICENSE", "NOTICE" ]
 
 [tool.poetry.dependencies]
 python = ">=3.8"
-scipy
-xsuite
-sixtracktools
-pandas
+scipy = ">=1.9.3"
+xsuite = ">=0.4.0"
+pandas = ">=1.5.1"
 
 
 [tool.poetry.dev-dependencies]
