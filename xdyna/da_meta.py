@@ -29,8 +29,8 @@ def regenerate_meta_file(name, **kwargs):
         print("Warning: metadata file already exists! Not regenerated.")
     else:
         # Initialise fields by kwargs
-        for field in self._defaults:
-            setattr(meta, '_' + field, kwargs.get(field, self._defaults[field]) )
+        for field in _DAMetaData._defaults:
+            setattr(meta, '_' + field, kwargs.get(field, _DAMetaData._defaults[field]) )
         meta._store()
         return meta
 
