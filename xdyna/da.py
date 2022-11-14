@@ -326,6 +326,75 @@ class DA:
 
 
     # Not allowed on parallel process
+    def generate_initial_grid(self, *, 
+                                x_min, x_max, x_step=None, x_num=None,
+                                y_min, y_max, y_step=None, y_num=None,
+                                px_norm=0, py_norm=0, zeta=0, delta=0.00027,
+                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """Generate the initial conditions in a 2D grid.
+        """
+
+        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+
+        # Make the grid in xy
+        def check_options(coord_min, coord_max, coord_step, coord_num):
+            if coord_step is None and coord_num is None:
+                raise ValueError(f"Specify at least 'step' or 'num'.")
+            elif coord_step is not None and coord_num is not None:
+                raise ValueError(f"Use only one of 'step' and 'num', not both.")
+            elif coord_step is not None:
+                coord_num = floor( (coord_max-coord_min) / coord_step ) + 1
+                coord_max = coord_min + (coord_num-1) * coord_step
+            return coord_min, coord_max, coord_num
+
+        x_min, x_max, x_num = check_options(x_min, x_max, x_step, x_num)
+        y_min, y_max, y_num = check_options(y_min, y_max, y_step, y_num)
+
+        x_space = np.linspace(x_min, x_max, x_num)
+        y_space = np.linspace(y_min, y_max, y_num)
+
+        # Make all combinations
+        if self.meta.nseeds > 0:
+            self.meta.nseeds = nseeds
+            seeds = np.arange(1,nseeds+1)
+            x, y, seeds = np.array(np.meshgrid(x_space, y_space, seeds)).reshape(3,-1)
+        else:
+            x, y = np.array(np.meshgrid(x_space, y_space)).reshape(2,-1)
+
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        self._surv['ang_xy'] = np.tan(y/x)
+        self._surv['r_xy'] = np.sqrt(x**2 + y**2)
+        self._surv['nturns'] = -1
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['px_norm_in'] = px_norm
+        self._surv['py_norm_in'] = py_norm
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
+        self.write_surv()
+        self.meta.da_type = 'grid'
+        self.meta.da_dim = 2
+        self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
+        self.meta.npart = len(self._surv.index)
+        self.meta._store()
+
+
+
+    # Not allowed on parallel process
     def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
