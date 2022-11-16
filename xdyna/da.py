@@ -344,7 +344,7 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_initial_grid(self, *, 
+    def generate_initial_grid(self, *,
                                 x_min, x_max, x_step=None, x_num=None,
                                 y_min, y_max, y_step=None, y_num=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,

@@ -26,7 +26,8 @@ def test_simple_radial(mode):
     tracker.matrix_stability_tol = 9e-1
 
     DA = xd.DA(name=f'fcc_ee_{mode}',
-               normalised_emittance=[EMITTANCE[mode]['X'], EMITTANCE[mode]['Y']],
+               normalised_emittance=[EMITTANCE[mode]['X']*ref_particle.beta0*ref_particle.gamma0,
+                                     EMITTANCE[mode]['Y']*ref_particle.beta0*ref_particle.gamma0],
                max_turns=TURNS[mode],
                use_files=False)
     DA.generate_initial_radial(angles=1, r_min=2, r_max=20, r_step=4., delta=0.000)
@@ -49,9 +50,10 @@ def test_simple_grid(mode):
     tracker.matrix_stability_tol = 9e-1
 
     DA = xd.DA(name=f'fcc_ee_{mode}',
-               normalised_emittance=[EMITTANCE[mode]['X'], EMITTANCE[mode]['Y']],
+               normalised_emittance=[EMITTANCE[mode]['X']*ref_particle.beta0*ref_particle.gamma0,
+                                     EMITTANCE[mode]['Y']*ref_particle.beta0*ref_particle.gamma0],
                max_turns=TURNS[mode],
                use_files=False)
-    DA.generate_initial_grid(x_min=0, x_max=20, x_step=4, y_min=0, y_max=20, y_step=4, delta=0.000)
+    DA.generate_initial_grid(x_min=0, x_max=20, x_step=10, y_min=0, y_max=20, y_step=10, delta=0.000)
     DA.line = line
     DA.track_job()
