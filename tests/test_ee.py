@@ -32,3 +32,26 @@ def test_simple_radial(mode):
     DA.generate_initial_radial(angles=1, r_min=2, r_max=20, r_step=4., delta=0.000)
     DA.line = line
     DA.track_job()
+
+
+@pytest.mark.parametrize("mode", ['t']) # use t mode for now, since z takes quite long
+def test_simple_grid(mode):
+    with open(TEST_DIR/'input'/'tapered_t_b1_thin.json', 'r', encoding='utf-8') as fid:
+        loaded_dct = json.load(fid)
+    line = xt.Line.from_dict(loaded_dct)
+
+    context = xo.ContextCpu()
+
+    ref_particle = xp.Particles(mass0=xp.ELECTRON_MASS_EV, q0=1, p0c=ENERGY[mode]*10**9, x=0, y=0)
+    line.particle_ref = ref_particle
+    tracker = xt.Tracker(_context=context, line=line)
+    tracker.configure_radiation(mode='mean')
+    tracker.matrix_stability_tol = 9e-1
+
+    DA = xd.DA(name=f'fcc_ee_{mode}',
+               normalised_emittance=[EMITTANCE[mode]['X'], EMITTANCE[mode]['Y']],
+               max_turns=TURNS[mode],
+               use_files=False)
+    DA.generate_initial_grid(x_min=0, x_max=20, x_step=4, y_min=0, y_max=20, y_step=4, delta=0.000)
+    DA.line = line
+    DA.track_job()

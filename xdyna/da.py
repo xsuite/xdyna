@@ -348,11 +348,11 @@ class DA:
                                 x_min, x_max, x_step=None, x_num=None,
                                 y_min, y_max, y_step=None, y_num=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D grid.
         """
 
-        self._prepare_generation(emittance, nseeds, pairs_shift, pairs_shift_var)
+        self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
         # Make the grid in xy
         def check_options(coord_min, coord_max, coord_step, coord_num, plane):
@@ -383,7 +383,7 @@ class DA:
         self._surv = pd.DataFrame()
         if self.meta.nseeds > 0:
             self._surv['seed'] = seeds.astype(int)
-        self._surv['ang_xy'] = np.tan(y/x)*180/np.pi
+        self._surv['ang_xy'] = np.arctan2(y,x)*180/np.pi
         self._surv['r_xy'] = np.sqrt(x**2 + y**2)
         self._surv['nturns'] = -1
         self._surv['x_norm_in'] = x
