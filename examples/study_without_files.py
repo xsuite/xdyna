@@ -8,11 +8,11 @@ from pathlib import Path
 # ================================================================
 
 # This will instantiate a DA object (without files)
-DA = xd.DA(name='hllhc_da', emittance=2.5e-6, max_turns=1, min_turns=0)
+DA = xd.DA(name='hllhc_da', normalised_emittance=2.5e-6, max_turns=1e4)
 
 # Generate the initial conditions on a polar grid
 # DA.generate_random_initial(num_part=100, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027)
-DA.generate_initial_radial(angles=1, r_min=2, r_max=20, r_step=2/30., delta=0.00027)
+DA.generate_initial_radial(angles=11, r_min=2, r_max=20, r_step=2/30., delta=0.00027)
 # DA.generate_initial_radial(angles=11, r_min=2, r_max=20, r_step=2/30., delta=0.00027, nseeds=60)
 
 
@@ -25,7 +25,7 @@ DA.generate_initial_radial(angles=1, r_min=2, r_max=20, r_step=2/30., delta=0.00
 # # First we specify the path to the line file, so we can choose where it will be stored
 # # once calculated (if this step is skipped, it will be asigned the same name as the
 # # MAD-X file but as *.line.json)
-# DA.line_file = Path.cwd() / 'machines' / 'hllhc_sequence.line.json'
+# DA.line_file = Path.cwd() / 'test.line.json'
 # DA.build_line_from_madx(file=Path.cwd() / 'machines' / 'hl14_col_chrom_15_oct_300_B1_s1.mask', sequence='lhcb1')
 
 # Load an xtrack line (this will also store the path to the line file in the metadata)
@@ -41,6 +41,8 @@ DA.load_line_from_file(Path.cwd() / 'machines' / 'hllhc_sequence.line.json')
 # ================================================================
 
 # Do the tracking (over all particles and potentially all seeds)
+# Watch out, with the current configuration (~3000 particles) this takes around 1.5s per turn,
+# or, in other words, a total of almost 3 hours for 1e4 turns!
 DA.track_job()
 
 # # In case we are using GPUs, we can manually define a context and build the tracker
