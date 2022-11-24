@@ -17,12 +17,14 @@ da = xd.DA(
     name='name_of_your_study', # used to generate a directory where files are stored
     normalised_emittance=[1,1], # provide normalized emittance for particle initialization in [m]
     max_turns=1e5, # number of turns to track
-    use_files=False # in case DA studies are run on HTC condor, files are used to collect the information
-                    # if the study runs on one machine, no files are needed
+    use_files=False 
+    # in case DA studies are run on HTC condor, files are used to collect the information
+    # if the study runs on one machine, no files are needed
 )
     
+# initialize a grid of particles using 5 angles in x-y space, in a range from 0 to 20 sigmas in steps of 5 sigma.
+da.generate_initial_radial(angles=5, r_min=0, r_max=20, r_step=5, delta=0.) 
 
-da.generate_initial_radial(angles=5, r_min=0, r_max=20, r_step=5, delta=0.) # initialize a grid of particles using 5 angles in x-y space, in a range from 0 to 20 sigmas in steps of 5 sigma.
 da.line = line # associate prev. created line, holding the lattice and context, with DA object
 
 da.track_job() # start the tracking
