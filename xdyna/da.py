@@ -342,6 +342,62 @@ class DA:
             self._surv = pd.concat([self._surv, df])
 
 
+    def set_coordinates(self, *, 
+                        x=None, px=None, y=None, py=None, zeta=None, delta=None,
+                        normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """
+        Let user provide initial coordinates for each plane.
+        """
+
+        self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
+        
+        user_provided_coords = [i for i in [x,px, y, py, zeta, delta] if i is not None]
+
+        # check that all provided list have the same length
+        assert len(set([len(i) for i in user_provided_coords])) == 1, 'Mismatch in length of provided lists'
+
+        for i in [x,px, y, py, zeta, delta]:
+            if i is None:
+                i=np.array([0])
+
+        # Make all combinations
+        if self.meta.nseeds > 0:
+            self.meta.nseeds = nseeds
+            seeds = np.arange(1,nseeds+1)
+            x, px, y, py, zeta, delta, seeds = np.array(np.meshgrid(x, px, y, py, zeta, delta, seeds)).reshape(7,-1)
+
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        
+        self._surv['nturns'] = -1
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['px_norm_in'] = px
+        self._surv['py_norm_in'] = py
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
+        self.write_surv()
+        self.meta.da_type = 'grid'
+        self.meta.da_dim = len(user_provided_coords)
+        # self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
+        self.meta.npart = len(self._surv.index)
+        self.meta._store()
+
+
+
 
     # Not allowed on parallel process
     def generate_initial_grid(self, *,
@@ -349,7 +405,7 @@ class DA:
                                 y_min, y_max, y_step=None, y_num=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
-        """Generate the initial conditions in a 2D grid.
+        """Generate the initial conditions in a 2D X-Y grid.
         """
 
         self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)

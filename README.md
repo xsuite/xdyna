@@ -4,7 +4,7 @@ Tools to study beam dynamics in xtrack simulations, like dynamic aperture calcul
 
 ## Dynamic aperture studies
 
-The `xdyna` package provdies the `DA` class to provide a simple front-end for setting up and running dynamic aperture studies.
+The `xdyna` package provides the `DA` class to provide a simple front-end for setting up and running dynamic aperture studies.
 
 To start, a `xtrack.line` object is required.
 The following code then sets up the study and launches the tracking
