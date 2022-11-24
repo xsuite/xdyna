@@ -116,7 +116,7 @@ class DA:
         if self.meta.nseeds > 0:
             view_cols += ['seed']
         if self.meta.pairs_shift == 0:
-            view_cols += ['nturns']
+            view_cols += ['nturns', 'state']
             df = self._surv[view_cols]
         else:
             orig = self._surv['paired_to'] == self._surv.index
