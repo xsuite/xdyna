@@ -20,4 +20,4 @@ def test_user_coordinates():
                use_files=False)
     DA.set_coordinates(x=[1,2], y = [3,4])
 
-    assert assert_frame_equal(DA.survival_data[['x', 'y']], pd.DataFrame(data={'x':[1,2], 'y':[3,4]}) )
+    assert_frame_equal(DA.survival_data[['x', 'y']], pd.DataFrame(data={'x':[1,2], 'y':[3,4]}) )
