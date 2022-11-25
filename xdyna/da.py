@@ -124,6 +124,8 @@ class DA:
             # Change to np.array to ignore index
             df['nturns1'] = np.array(self._surv.loc[orig,'nturns'])
             df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
+            df['state1'] = np.array(self._surv.loc[orig,'state'])
+            df['state2'] = np.array(self._surv.loc[~orig,'state'])
         return df.rename(columns = {
                     'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
                     'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
