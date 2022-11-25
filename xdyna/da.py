@@ -131,6 +131,12 @@ class DA:
                     'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
                 }, inplace=False)
 
+
+    def to_pandas(self, full: bool=False) -> pd.DataFrame:
+        if full:
+            return self._surv
+        return self.survival_data
+
     @property
     def meta(self):
         return self._meta
