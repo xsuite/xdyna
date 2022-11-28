@@ -25,5 +25,5 @@ DA.generate_initial_radial(angles=11, r_min=2, r_max=20, r_step=2/30., delta=0.0
 
 # Otherwise we specify the path to the mad-x file and go to Step1bis. We also specify the path
 # to the line file, so we can choose where it will be stored once calculated.
-DA.madx_file = Path.cwd() / 'machines' / 'hl14_col_chrom_15_oct_300_B1_s1.mask'
+DA.madx_file = Path.cwd() / 'machines' / 'hl14_col_chrom_15_oct_300_B1.mask'
 DA.line_file = Path.cwd() / 'machines' / 'hllhc_sequence_with_seeds.line.json'
