@@ -46,28 +46,31 @@ class DA:
     def __init__(self, name, *, path=Path.cwd(), use_files=False, **kwargs):
         # Initialise metadata
         self._meta = _DAMetaData(name=name, path=path, use_files=use_files)
-        self.meta._store_properties = False
-        self.meta.nseeds       = kwargs.get('nseeds',       _DAMetaData._defaults['nseeds'])
-        self.meta.max_turns    = kwargs.get('max_turns')
-        self.meta.min_turns    = kwargs.get('min_turns',    _DAMetaData._defaults['min_turns'])
-        self.meta.energy       = kwargs.get('energy',       _DAMetaData._defaults['energy'])
-        self.meta.db_extension = kwargs.get('db_extension', _DAMetaData._defaults['db_extension'])
-        nemitt_x               = kwargs.get('nemitt_x', None)
-        nemitt_y               = kwargs.get('nemitt_y', None)
-        normalised_emittance   = kwargs.get('normalised_emittance', None)
-        if normalised_emittance is not None:
-            if nemitt_x is not None or nemitt_y is not None:
-                raise ValueError("Use either normalised_emittance, or nemitt_x and nemitt_y.")
-            self.update_emittance(normalised_emittance, update_surv=False)
-        elif nemitt_x is not None or nemitt_y is not None:
-            if nemitt_x is not None and nemitt_y is not None:
-                self.update_emittance([nemitt_x, nemitt_y], update_surv=False)
-            else:
-                raise ValueError("Need both nemitt_x and nemitt_y.")
-        self.meta._store()
+        if self.meta._new:
+            self.meta._store_properties = False
+            self.meta.nseeds       = kwargs.pop('nseeds',       _DAMetaData._defaults['nseeds'])
+            if 'max_turns' not in kwargs.keys():
+                raise TypeError("DA.__init__() missing 1 required positional argument: 'max_turns'")
+            self.meta.max_turns    = kwargs.pop('max_turns')
+            self.meta.min_turns    = kwargs.pop('min_turns',    _DAMetaData._defaults['min_turns'])
+            self.meta.energy       = kwargs.pop('energy',       _DAMetaData._defaults['energy'])
+            self.meta.db_extension = kwargs.pop('db_extension', _DAMetaData._defaults['db_extension'])
+            nemitt_x               = kwargs.pop('nemitt_x',     None)
+            nemitt_y               = kwargs.pop('nemitt_y',      None)
+            normalised_emittance   = kwargs.pop('normalised_emittance', None)
+            if normalised_emittance is not None:
+                if nemitt_x is not None or nemitt_y is not None:
+                    raise ValueError("Use either normalised_emittance, or nemitt_x and nemitt_y.")
+                self.update_emittance(normalised_emittance, update_surv=False)
+            elif nemitt_x is not None or nemitt_y is not None:
+                if nemitt_x is not None and nemitt_y is not None:
+                    self.update_emittance([nemitt_x, nemitt_y], update_surv=False)
+                else:
+                    raise ValueError("Need both nemitt_x and nemitt_y.")
+            self.meta._store()
 
         # Initialise DA data
-        self.memory_threshold = kwargs.get('memory_threshold', 1e9)
+        self.memory_threshold = kwargs.pop('memory_threshold', 1e9)
         self._surv = None
         self._da = None
         self._da_evol = None
@@ -79,6 +82,10 @@ class DA:
         self.read_da_evol()
         if self.meta.line_file is not None and self.meta.line_file != -1 and self.meta.line_file.exists():
             self.load_line_from_file()
+
+        # Ignore leftover arguments
+        if kwargs != {}:
+            print(f"Ignoring unused arguments {list(kwargs.keys())}!")
 
 
 

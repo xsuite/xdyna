@@ -163,10 +163,12 @@ class _DAMetaData:
         # Initialise defaults
         for field in self._defaults:
             setattr(self, '_' + field, self._defaults[field])
+        self._new = True
         if use_files:
             if self.meta_file.exists():
                 print(f"Loading existing DA object (study {self.name} in {self.path}).")
                 self._read()
+                self._new = False
             else:
                 if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
                      raise ValueError("Tried to create new DA object, but some parquet files already exist!\n" \
