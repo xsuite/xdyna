@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import datetime
 import time
+import tempfile
 
 from scipy import interpolate, integrate
 # from scipy.constants import c as clight
@@ -728,10 +729,12 @@ class DA:
                     data = fin.read()
                     with ProtectFile(madin, 'w') as fout:
                         fout.write(data.replace('%SEEDRAN', str(seed)))
-            with ProtectFile(madout, 'w') as pf:
-                print("Running MAD-X")
-                mad = Madx(stdout=pf)
-                mad.call(madin.as_posix())
+            with tempfile.TemporaryDirectory() as tmpdir:
+                with ProtectFile(madout, 'w') as pf:
+                    print("Running MAD-X")
+                    mad = Madx(stdout=pf)
+                    mad.chdir(tmpdir)
+                    mad.call(madin.as_posix())
             line = xt.Line.from_madx_sequence(mad.sequence[sequence], apply_madx_errors=errors, \
                                               install_apertures=apertures)
             line.particle_ref = xp.Particles(mass0=mass, gamma0=mad.sequence[sequence].beam.gamma)
@@ -748,10 +751,11 @@ class DA:
                 if store_line:
                     with ProtectFile(self.line_file, 'r+') as pf:
                         data = json.load(pf)
-                        data[seed] = line
+                        data[seed] = line.to_dict()
                         pf.truncate(0)  # Delete file contents (to avoid appending)
                         pf.seek(0)      # Move file pointer to start of file
-                        json.dump(data.to_dict(), pf, cls=xo.JEncoder, indent=True)
+                        json.dump(data, pf, cls=xo.JEncoder, indent=True)
+
         if len(np.unique([ round(e, 4) for e in energy])) != 1:
             raise ValueError(f"The lines for the different seeds have different energies: {energy}!")
         self.meta.energy = energy[0]
