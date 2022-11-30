@@ -80,8 +80,6 @@ class DA:
         self.read_surv()
         self.read_da()
         self.read_da_evol()
-        if self.meta.line_file is not None and self.meta.line_file != -1 and self.meta.line_file.exists():
-            self.load_line_from_file()
 
         # Ignore leftover arguments
         if kwargs != {}:
@@ -269,7 +267,7 @@ class DA:
         self.meta.line_file = file
 
     def load_line_from_file(self, file=None):
-        if self.line_file is not None and self.line_file != -1 and file != self.line_file:
+        if file is not None and self.line_file is not None and self.line_file != -1 and file != self.line_file:
             raise ValueError("Trying to load different line than the one specified in the metafile! " + \
                              "This is not allowed. If you want to remove the line from the metafile, " + \
                              "please do DA.line_file = None.")
@@ -284,7 +282,13 @@ class DA:
                 file = self.line_file
         with ProtectFile(file, 'r') as pf:
             line = json.load(pf)
-        self.line = line
+
+        # Fix string keys in JSON: seeds are int
+        if self.meta.nseeds > 0:
+            if len(line.keys()) > self.meta.nseeds:
+                raise ValueError("Line file not compatible with seeds! Expected a dict of lines with seeds as keys.")
+            line = {int(seed): l for seed, l in line.items()}
+        self._line = line
         self.line_file = file
 
 
@@ -650,8 +654,6 @@ class DA:
 
         if store_line and self.line_file is None:
             self.line_file = self.madx_file.parent / (self.madx_file.stem + '.line.json')
-        if store_line and self.line_file.exists():
-            print(f"Warning: line_file {self.line_file} exists and will be overwritten.")
 
         # Find which seeds to run, and initialise line file if it is to be stored
         if self.meta.nseeds == 0:
@@ -660,18 +662,24 @@ class DA:
             self._line = {}
             if run_all_seeds:
                 if seeds is not None:
-                    raise ValueError("Cannot have run_all_seeds=True and seed!=None. Choose one.")
+                    raise ValueError("Cannot have run_all_seeds=True and seeds!=None. Choose one.")
                 seeds = range(1, self.meta.nseeds+1)
                 print("Calculating the line from MAD-X for all available seeds. Make sure this is not ran on " + \
                       "a parallel process, as results might be unpredictable and probably wrong.")
                 if store_line:
+                    if self.line_file.exists():
+                        print(f"Warning: line_file {self.line_file} exists and will be overwritten.")
                     with ProtectFile(self.line_file, 'w') as pf:
                         data = {seed: 'Running MAD-X' for seed in seeds}
                         json.dump(data, pf, cls=xo.JEncoder, indent=True)
-            elif seeds is not None:
-                if not hasattr(seeds, '__iter__'):
-                    seeds = [ seeds ]
-                print(f"Processing seeds {seeds}.")
+            else:
+                if seeds is not None:
+                    if not hasattr(seeds, '__iter__'):
+                        seeds = [ seeds ]
+                elif not store_line:
+                    raise ValueError("Cannot determine seed automatically (run_all_seeds=False and seed=None) " + \
+                                     "if store_line=False, as the line file is needed to find seeds for which " + \
+                                     "the MAD-X calculation isn't yet performed.")
                 if store_line:
                     created = False
                     if not self.line_file.exists():
@@ -680,7 +688,9 @@ class DA:
                             with open(self.line_file, 'x') as fid:
                             # Important: This cannot be a ProtectFile because of the underlying logic for creating files
                             # TODO: at least I think so; maybe it works, to be checked
-                                data = {seed: 'Running MAD-X' for seed in seed}
+                                if seeds is None:
+                                    seeds = [ 1 ]
+                                data = {str(seed): 'Running MAD-X' for seed in seeds}
                                 json.dump(data, fid, cls=xo.JEncoder, indent=True)
                             created = True
                         except FileExistsError:
@@ -688,57 +698,34 @@ class DA:
                     if not created:
                         with ProtectFile(self.line_file, 'r+') as pf:
                             data = json.load(pf)
+                            if seeds is None:
+                                seeds = [ len(data.keys()) + 1 ]
                             for seed in seeds:
-                                data[seed] = 'Running MAD-X'
+                                if seed in data.keys():
+                                    print(f"Warning: line_file {self.line_file} already contains result for seed {seed}. " + \
+                                           "This will be overwritten.")
+                                data[str(seed)] = 'Running MAD-X'
                             pf.truncate(0)  # Delete file contents (to avoid appending)
                             pf.seek(0)      # Move file pointer to start of file
-                            json.dump(data, pf, cls=xo.JEncoder, indent=True)
-            else:
-            # Automatically find a seed that is not ran yet
-                if not store_line:
-                    raise ValueError("Cannot determine seed automatically (run_all_seeds=False and seed=None) " + \
-                                     "if store_line=False, as the line file is needed to find seeds for which " + \
-                                     "the MAD-X calculation isn't yet performed.")
-                created = False
-                if not self.line_file.exists():
-                    try:
-                    # Hack to make it thread-safe
-                        with open(self.line_file, 'x') as fid:
-                        # Important: This cannot be a ProtectFile because of the underlying logic for creating files
-                        # TODO: at least I think so; maybe it works, to be checked
-                            seed = 1
-                            data = {seed: 'Running MAD-X'}
-                            json.dump(data, fid, cls=xo.JEncoder, indent=True)
-                        created = True
-                    except FileExistsError:
-                        pass
-                if not created:
-                    with ProtectFile(self.line_file, 'r+') as pf:
-                        data = json.load(pf)
-                        seed = len(data.keys()) + 1
-                        data[seed] = 'Running MAD-X'
-                        pf.truncate(0)  # Delete file contents (to avoid appending)
-                        pf.seek(0)      # Move file pointer to start of file
-                        json.dump(data, pf, cls=xo.JEncoder, indent=True)
-                print(f"Processing seed {seed}.")
-                seeds = [ seed ]
+                            json.dump(data, pf, cls=xo.JEncoder, indent=True)    
+                print(f"Processing seed{'s' if len(seeds) > 1 else ''} {seeds[0] if len(seeds) == 1 else seeds}.")
 
         # Run MAD-X
         energy = []
         for seed in seeds:
-            if seed is None:
-                madin = self.madx_file
-                madout = self.madx_file.parent / (self.madx_file.stem + '.madx.out')
-            else:
-                madin = self.madx_file.parent / (self.madx_file.stem + '.' + str(seed) + '.madx')
-                madout = self.madx_file.parent / (self.madx_file.stem + '.' + str(seed) + '.madx.out')
-                with ProtectFile(self.madx_file, 'r') as fin:
-                    data = fin.read()
-                    with ProtectFile(madin, 'w') as fout:
-                        fout.write(data.replace('%SEEDRAN', str(seed)))
             with tempfile.TemporaryDirectory() as tmpdir:
+                if seed is None:
+                    madin = self.madx_file
+                    madout = self.madx_file.parent / (self.madx_file.stem + '.madx.out')
+                else:
+                    madin = Path(tmpdir) / self.madx_file.name
+                    madout = self.madx_file.parent / (self.madx_file.stem + '.' + str(seed) + '.madx.out')
+                    with ProtectFile(self.madx_file, 'r') as fin:
+                        data = fin.read()
+                        with ProtectFile(madin, 'w') as fout:
+                            fout.write(data.replace('%SEEDRAN', str(seed)))
                 with ProtectFile(madout, 'w') as pf:
-                    print("Running MAD-X")
+                    print(f"Running MAD-X in {tmpdir}")
                     mad = Madx(stdout=pf)
                     mad.chdir(tmpdir)
                     mad.call(madin.as_posix())
@@ -754,11 +741,13 @@ class DA:
                     with ProtectFile(self.line_file, 'w') as pf:
                         json.dump(self.line.to_dict(), pf, cls=xo.JEncoder, indent=True)
             else:
+                if self._line is None:
+                    self._line = {}
                 self._line[seed] = line
                 if store_line:
                     with ProtectFile(self.line_file, 'r+') as pf:
                         data = json.load(pf)
-                        data[seed] = line.to_dict()
+                        data[str(seed)] = line.to_dict()
                         pf.truncate(0)  # Delete file contents (to avoid appending)
                         pf.seek(0)      # Move file pointer to start of file
                         json.dump(data, pf, cls=xo.JEncoder, indent=True)
@@ -776,7 +765,10 @@ class DA:
     # Allowed on parallel process
     def track_job(self, *,  npart=None, logging=True, force_single_seed_per_job=None):
         if self.line is None:
-            raise Exception("Need to load line first!")
+            if self.meta.line_file is not None and self.meta.line_file != -1 and self.meta.line_file.exists():
+                self.load_line_from_file()
+            else:
+                raise Exception("No line loaded nor found on file!")
             
         # Create a job: get job ID and start logging
         part_ids, seeds, flag = self._create_job(npart, logging, force_single_seed_per_job)
@@ -798,6 +790,7 @@ class DA:
                     print(f"Building tracker for seed {seed}.")
                     self.line[seed].build_tracker()
 
+        # TODO: DOES NOT WORK WITH SEEDS
         # Create initial particles
         x_norm  = self._surv['x_norm_in'].to_numpy()
         y_norm  = self._surv['y_norm_in'].to_numpy()
