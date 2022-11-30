@@ -165,7 +165,7 @@ class _DAMetaData:
             setattr(self, '_' + field, self._defaults[field])
         if use_files:
             if self.meta_file.exists():
-                print("Loading existing DA object.")
+                print(f"Loading existing DA object (study {self.name} in {self.path}).")
                 self._read()
             else:
                 if self.surv_file.exists() or self.da_file.exists() or self.da_evol_file.exists():
