@@ -167,7 +167,7 @@ class _DAMetaData:
 
         if use_files:
             if self.meta_file.exists():
-                print(f"Loading existing DA object (study {self.name} in {self.path}).")
+                print(f"Loading existing DA object ({self.name} in {self.path}).")
                 self._read()
                 self._new = False
             else:

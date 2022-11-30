@@ -668,9 +668,9 @@ class DA:
                       "a parallel process, as results might be unpredictable and probably wrong.")
                 if store_line:
                     if self.line_file.exists():
-                        print(f"Warning: line_file {self.line_file} exists and will be overwritten.")
+                        print(f"Warning: line_file {self.line_file} exists and is being overwritten.")
                     with ProtectFile(self.line_file, 'w') as pf:
-                        data = {seed: 'Running MAD-X' for seed in seeds}
+                        data = {str(seed): 'Running MAD-X' for seed in seeds}
                         json.dump(data, pf, cls=xo.JEncoder, indent=True)
             else:
                 if seeds is not None:
@@ -681,13 +681,11 @@ class DA:
                                      "if store_line=False, as the line file is needed to find seeds for which " + \
                                      "the MAD-X calculation isn't yet performed.")
                 if store_line:
+                    # Hack to make it thread-safe
                     created = False
                     if not self.line_file.exists():
                         try:
-                        # Hack to make it thread-safe
-                            with open(self.line_file, 'x') as fid:
-                            # Important: This cannot be a ProtectFile because of the underlying logic for creating files
-                            # TODO: at least I think so; maybe it works, to be checked
+                            with ProtectFile(self.line_file, 'x') as fid:
                                 if seeds is None:
                                     seeds = [ 1 ]
                                 data = {str(seed): 'Running MAD-X' for seed in seeds}
@@ -699,11 +697,24 @@ class DA:
                         with ProtectFile(self.line_file, 'r+') as pf:
                             data = json.load(pf)
                             if seeds is None:
-                                seeds = [ len(data.keys()) + 1 ]
+                                n_existing = len(data.keys())
+                                if n_existing == self.meta.nseeds:
+                                    # TODO: implement system to rerun failed MAD-X
+#                                     to_redo = False
+#                                     for seed, val in data.items():
+#                                         if val == 'MAD-X failed':
+#                                             seeds = [ int(seed) ]
+#                                             to_redo = True
+#                                             break
+#                                     if not to_redo:
+                                    print("File already has a line for every seed. Nothing to be done.")
+                                    return
+                                else:
+                                    seeds = [ n_existing + 1 ]
                             for seed in seeds:
-                                if seed in data.keys():
-                                    print(f"Warning: line_file {self.line_file} already contains result for seed {seed}. " + \
-                                           "This will be overwritten.")
+                                if str(seed) in data.keys():
+                                    print(f"Warning: line_file {self.line_file} already contained a result for seed {seed}. " + \
+                                           "This is being overwritten.")
                                 data[str(seed)] = 'Running MAD-X'
                             pf.truncate(0)  # Delete file contents (to avoid appending)
                             pf.seek(0)      # Move file pointer to start of file
@@ -729,6 +740,7 @@ class DA:
                     mad = Madx(stdout=pf)
                     mad.chdir(tmpdir)
                     mad.call(madin.as_posix())
+                    # TODO: check if MAD-X failed: if so, write 'MAD-X failed' into line_file
             line = xt.Line.from_madx_sequence(mad.sequence[sequence], apply_madx_errors=errors, \
                                               install_apertures=apertures)
             line.particle_ref = xp.Particles(mass0=mass, gamma0=mad.sequence[sequence].beam.gamma)
@@ -752,9 +764,13 @@ class DA:
                         pf.seek(0)      # Move file pointer to start of file
                         json.dump(data, pf, cls=xo.JEncoder, indent=True)
 
+        # Check energy
+        if self.meta.energy is not None:
+            energy = [ *energy, self.meta.energy ]
         if len(np.unique([ round(e, 4) for e in energy])) != 1:
             raise ValueError(f"The lines for the different seeds have different energies: {energy}!")
-        self.meta.energy = energy[0]
+        if self.meta.energy is None:
+            self.meta.energy = energy[0]
 
 
 
@@ -769,7 +785,7 @@ class DA:
                 self.load_line_from_file()
             else:
                 raise Exception("No line loaded nor found on file!")
-            
+
         # Create a job: get job ID and start logging
         part_ids, seeds, flag = self._create_job(npart, logging, force_single_seed_per_job)
         if flag != 0:
