@@ -43,10 +43,10 @@ class DA:
 #                 'nturns', 'paired_to', 'submitted'
 #              ]
 
-    def __init__(self, name, *, path=Path.cwd(), use_files=False, **kwargs):
+    def __init__(self, name, *, path=Path.cwd(), use_files=False, read_only=False, **kwargs):
         # Initialise metadata
-        self._meta = _DAMetaData(name=name, path=path, use_files=use_files)
-        if self.meta._new:
+        self._meta = _DAMetaData(name=name, path=path, use_files=use_files, read_only=read_only)
+        if self.meta._new and not read_only:
             self.meta._store_properties = False
             self.meta.nseeds       = kwargs.pop('nseeds',       _DAMetaData._defaults['nseeds'])
             if 'max_turns' not in kwargs.keys():
@@ -1058,7 +1058,7 @@ class DA:
             return None
 
     def write_surv(self, pf=None):
-        if self.meta._use_files:
+        if self.meta._use_files and not self.meta._read_only:
             if self.meta.db_extension=='parquet':
                 if pf is None:
                     with ProtectFile(self.meta.surv_file, 'wb', wait=_db_access_wait_time) as pf:
@@ -1087,7 +1087,7 @@ class DA:
             return None
 
     def write_da(self, pf=None):
-        if self.meta._use_files:
+        if self.meta._use_files and not self.meta._read_only:
             if self.meta.db_extension=='parquet':
                 if pf is None:
                     with ProtectFile(self.meta.da_file, 'wb', wait=_db_access_wait_time) as pf:
@@ -1116,7 +1116,7 @@ class DA:
             return None
 
     def write_da_evol(self, pf=None):
-        if self.meta._use_files:
+        if self.meta._use_files and not self.meta._read_only:
             if self.meta.db_extension=='parquet':
                 if pf is None:
                     with ProtectFile(self.meta.da_evol_file, 'wb', wait=_db_access_wait_time) as pf:

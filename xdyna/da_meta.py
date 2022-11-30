@@ -18,7 +18,6 @@ from .protectfile import ProtectFile
 #    - @property setter and getter
 
 # TODO: missing particle selection ...   =>  ?
-# TODO: do not use optional fields!?
 
 def regenerate_meta_file(name, **kwargs):
     """Function to manually regenerate the *.meta.json file, in case it got corrupted or deleted.
@@ -117,14 +116,12 @@ class _DAMetaData:
     # _path_fields is used to list those that require a special treatment:
     #      They need to have a .to_posix() call before storing in the json
     # _auto_fields are calculated automatically and do not need to be read in
-#    # _optional_fields will not be stored to the json if their value is None
     
     _fields = ['name','path','da_type','da_dim','nemitt_x','nemitt_y','min_turns','max_turns','npart','energy','nseeds',\
                'r_max','pairs_shift','pairs_shift_var','s_start','meta_file','madx_file','line_file','db_extension',\
                'surv_file','da_file','da_evol_file','submissions']
     _path_fields = ['path','meta_file','madx_file','line_file','surv_file','da_file','da_evol_file']
     _auto_fields = ['name','path','meta_file','surv_file','da_file','da_evol_file']
-#     _optional_fields = []  # these default to None
     # used to specify the accepted DA types
     _da_types=['radial', 'grid', 'monte_carlo', 'free']
     # used to specify the accepted file formats for the survival dataframe
@@ -151,7 +148,7 @@ class _DAMetaData:
     } #| { field: None for field in _optional_fields}
 
 
-    def __init__(self, name, *, path=Path.cwd(), use_files=False):
+    def __init__(self, name, *, path=Path.cwd(), use_files=False, read_only=False):
         # Remove .meta.json suffix if passed with filename
         if name.split('.')[-2:] == ['meta', 'json']:
             name = name[:-10]
@@ -164,6 +161,10 @@ class _DAMetaData:
         for field in self._defaults:
             setattr(self, '_' + field, self._defaults[field])
         self._new = True
+        if read_only and not use_files:
+            read_only = False
+        self._read_only = read_only
+
         if use_files:
             if self.meta_file.exists():
                 print(f"Loading existing DA object (study {self.name} in {self.path}).")
@@ -176,9 +177,10 @@ class _DAMetaData:
                                      + "file in the same folder as the parquet files, or regenerate the metadata file " \
                                      + "manually with xdyna.regenerate_meta_file(). Or, if the parquet files are old/wrong, " \
                                      + "just delete them.")
+                if read_only:
+                    raise ValueError("Specified read_only=True but no files found!")
                 print("Creating new DA object.")
                 self._store()
-
 
     @property
     def name(self):
@@ -397,7 +399,7 @@ class _DAMetaData:
 
     # Allowed on parallel process.
     def new_submission_id(self):
-        if not self._use_files:
+        if not self._use_files or self._read_only:
             return None
         else:
             with ProtectFile(self.meta_file, 'r+', wait=0.005) as pf:
@@ -413,7 +415,7 @@ class _DAMetaData:
     # Allowed on parallel process (but only if each process updates only the log attached to its unique ID).
     # This will overwrite the value associated to submission_id in self._submissions with val.
     def update_submissions(self, submission_id, val):
-        if self._use_files:
+        if self._use_files and not self._read_only:
             with ProtectFile(self.meta_file, 'r+', wait=0.005) as pf:
                 meta = json.load(pf)
                 meta['submissions'].update({str(submission_id): val})
@@ -430,10 +432,8 @@ class _DAMetaData:
                 self._check_not_changed_and_store(ignore=[prop])
     
     def _check_not_changed_and_store(self, ignore=[]):
-        if self._use_files:
+        if self._use_files and not self._read_only:
             # Create dict of self fields, ignoring the field that is expected to change
-#             # Also ignore optional keys that are not set
-#             ignore += [ x for x in self._optional_fields if getattr(self, x) is None ]
             sortkeys = [ x for x in self._fields if x not in ignore ]
             thisdict = { key: getattr(self, key) for key in sortkeys }
             # Special treatment for paths: make them strings
@@ -481,12 +481,8 @@ class _DAMetaData:
 
     def _store(self, pf=None):
         self._store_properties = True
-        if self._use_files:
-#             # Store everything except the optional fields that are None
-#             ignore = [ x for x in self._optional_fields if getattr(self, x) is None ]
-            ignore = []
-            sortkeys = [ x for x in self._fields if x not in ignore ]
-            meta = { key: getattr(self, key) for key in sortkeys }
+        if self._use_files and not self._read_only:
+            meta = { key: getattr(self, key) for key in self._fields }
             self._paths_to_strings(meta, ignore)
             if pf is None:
                 mode = 'r+' if self.meta_file.exists() else 'x+'
