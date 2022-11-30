@@ -459,14 +459,19 @@ class _DAMetaData:
             need_to_store = False
             with ProtectFile(self.meta_file, 'r+') as pf:
                 meta = json.load(pf)
+                # clean up paths in meta
+                for field in self._path_fields:
+                    val = meta.get(field, None)
+                    if val is not None:
+                        meta[field] = Path(meta[field])
+                    if field == 'line_file' and val == 'line manually added':
+                        meta[field] = -1
                 for field in self._fields:
                     if field in self._auto_fields and getattr(self, field)!=meta.get(field, None):
                         need_to_store = True
                     else:
                         # Default to None, in case of optional keys
                         val = meta.get(field, None)
-                        if field in self._path_fields and val is not None:
-                            val = Path(val)
                         setattr(self, '_' + field, val )
                 if need_to_store:
                     # Special treatment for line:
@@ -483,7 +488,7 @@ class _DAMetaData:
         self._store_properties = True
         if self._use_files and not self._read_only:
             meta = { key: getattr(self, key) for key in self._fields }
-            self._paths_to_strings(meta, [])
+            self._paths_to_strings(meta)
             if pf is None:
                 mode = 'r+' if self.meta_file.exists() else 'x+'
                 with ProtectFile(self.meta_file, mode) as pf:
