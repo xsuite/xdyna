@@ -483,7 +483,7 @@ class _DAMetaData:
         self._store_properties = True
         if self._use_files and not self._read_only:
             meta = { key: getattr(self, key) for key in self._fields }
-            self._paths_to_strings(meta, ignore)
+            self._paths_to_strings(meta, [])
             if pf is None:
                 mode = 'r+' if self.meta_file.exists() else 'x+'
                 with ProtectFile(self.meta_file, mode) as pf:
