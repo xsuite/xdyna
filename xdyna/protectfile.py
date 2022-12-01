@@ -8,7 +8,7 @@ import atexit
 import datetime
 import hashlib
 import io
-import pathlib
+from pathlib import Path
 import random
 import shutil
 import tempfile
@@ -43,7 +43,7 @@ def get_hash(filename, size=128):
     return h.hexdigest()
 
 def get_fstat(filename):
-    stats = pathlib.Path(filename).stat()
+    stats = Path(filename).stat()
     return {
                 'n_sequence_fields': stats.n_sequence_fields,
                 'n_unnamed_fields':  stats.n_unnamed_fields,
@@ -106,13 +106,13 @@ class ProtectFile:
     Reading in a file (while making sure it is not written to by another process):
 
     >>> from protectfile import ProtectedFile
-    >>> with ProtectedFile(thebook.txt, 'r', backup=False, wait=1) as pf:
+    >>> with ProtectedFile('thebook.txt', 'r', backup=False, wait=1) as pf:
     >>>    text = pf.read()
 
     Reading and appending to a file:
 
     >>> from protectfile import ProtectedFile
-    >>> with ProtectedFile(thebook.txt, 'r+', backup=False, wait=1) as pf:
+    >>> with ProtectedFile('thebook.txt', 'r+', backup=False, wait=1) as pf:
     >>>    text = pf.read()
     >>>    pf.write("This string will be added at the end of the file, \
     ...               however, it won't be added to the 'text' variable")
@@ -182,11 +182,11 @@ class ProtectFile:
         self._check_hash = arg.pop('check_hash', True)
 
         # Initialise paths
-        arg['file'] = pathlib.Path(arg['file']).resolve()
+        arg['file'] = Path(arg['file']).resolve()
         file = arg['file']
         self._file = file
-        self._lock = pathlib.Path(file.parent, file.name + '.lock').resolve()
-        self._temp = pathlib.Path(tempdir.name, file.name).resolve()
+        self._lock = Path(file.parent, file.name + '.lock').resolve()
+        self._temp = Path(tempdir.name, file.name).resolve()
 
         # Try to make lockfile, wait if unsuccesful
         while True:
@@ -198,8 +198,8 @@ class ProtectFile:
                 _print_debug("Init", f"waiting {wait}s to create {self.lockfile}")
                 time.sleep(wait)
 
-        # Clean up modes: we only use 'x' and 'r' (not 'w' and 'r') to have clear
-        # flow on new vs existing files
+        # We throw potential FileNotFoundError and FileExistsError before
+        # creating the backup and temporary files
         self._exists = True if self.file.is_file() else False
         mode = arg.get('mode','r')
         self._readonly = False
@@ -211,18 +211,12 @@ class ProtectFile:
         elif 'x' in mode:
             if self._exists:
                 raise FileExistsError
-#         else:
-#             # TODO: probably this is not needed
-#             if self._exists:
-#                 arg['mode'] = arg['mode'].replace("+", "").replace("w", "r+").replace("a", "r+")
-#             else:
-#                 arg['mode'] = arg['mode'].replace("w", "x").replace("a", "x")
 
         # Make a backup if requested
         if self._readonly and not self._backup_if_readonly:
             self._do_backup = False
         if self._do_backup and self._exists:
-            self._backup = pathlib.Path(file.parent, file.name + '.backup').resolve()
+            self._backup = Path(file.parent, file.name + '.backup').resolve()
             _print_debug("Init", f"cp {self.file=} to {self.backupfile=}")
             shutil.copy2(self.file, self.backupfile)
         else:
@@ -233,7 +227,9 @@ class ProtectFile:
             self._fstat = get_fstat(self.file)
 
         # Choose file pointer:
-        # Temporary if writing, or existing file if read-only
+        # To the temporary file if writing, or existing file if read-only
+        # TODO: if the original file is large, using a temporary file might be extremely
+        #       slow if many processes write to it concurrently
         if not self._readonly:
             if self._exists:
                 _print_debug("Init", f"cp {self.file=} to {self.tempfile=}")
@@ -315,7 +311,7 @@ class ProtectFile:
             self.backupfile.rename(self.file)
             print('Restored file to previous state.')
         if not self._readonly:
-            alt_file = pathlib.Path(self.file.parent, self.file.name + '__' \
+            alt_file = Path(self.file.parent, self.file.name + '__' \
                        + datetime.datetime.now().isoformat() + '.result').resolve()
             self.mv_temp(alt_file)
             print(f"Saved calculation results in {alt_file.name}.")
