@@ -287,7 +287,9 @@ class DA:
         if self.meta.nseeds > 0:
             if len(line.keys()) > self.meta.nseeds:
                 raise ValueError("Line file not compatible with seeds! Expected a dict of lines with seeds as keys.")
-            line = {int(seed): l for seed, l in line.items()}
+            line = {int(seed): xt.Line.from_dict(l) for seed, l in line.items()}
+        else:
+            line = xt.Line.from_dict(line)
         self._line = line
         self.line_file = file
 
