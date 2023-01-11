@@ -1,7 +1,7 @@
 import pytest
-import xdyna as xd
 import pandas as pd
 from pandas.testing import assert_frame_equal
+import xdyna as xd
 
 
 SURV_COLUMNS = ['ang_xy', 'r_xy', 'nturns', 'x_norm_in', 'y_norm_in', 'px_norm_in',
