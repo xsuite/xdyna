@@ -410,7 +410,7 @@ class DA:
         self._surv['finished'] = False
         self._create_pairs()
         self.write_surv()
-        self.meta.da_type = 'grid'
+        self.meta.da_type = 'free'
         self.meta.da_dim = len(user_provided_coords)
         # self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
         self.meta.npart = len(self._surv.index)
