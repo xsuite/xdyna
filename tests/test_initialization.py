@@ -27,10 +27,16 @@ def test_user_coordinates():
                normalised_emittance=[1,1],
                max_turns=2,
                use_files=False)
-    DA.set_coordinates(x=[1,2], y = [3,4])
+    DA.set_coordinates(x=[1,2], y = [3,4], px=[5,6])
 
-    assert_frame_equal(DA.survival_data[['x', 'y']],
-                       pd.DataFrame(data={'x':[1,2], 'y':[3,4]}) )
+    assert_frame_equal(DA.survival_data[['x', 'y', 'px', 'py', 'delta']],
+                       pd.DataFrame(data={
+                                        'x':[1,2],
+                                        'y':[3,4],
+                                        'px':[5,6],
+                                        'py':[0,0],
+                                        'delta':[0,0]
+                                            }) )
 
 
 def test_xy_grid():

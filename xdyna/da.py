@@ -97,6 +97,7 @@ class DA:
             self.read_surv()
         if self._surv is None:  # also nothing on file
             return None
+        
         if self.da_type == 'radial':
             if self.da_dimension == 2:
                 view_cols = ['ang_xy', 'r_xy']
@@ -108,7 +109,7 @@ class DA:
                 view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'delta_in']
             elif self.da_dimension == 6:
                 view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'zeta_in', 'delta_in']
-        else:
+        elif self.da_type == 'grid':
             if self.da_dimension == 2:
                 view_cols = ['x_norm_in', 'y_norm_in']
             elif self.da_dimension == 3:
@@ -119,8 +120,12 @@ class DA:
                 view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'delta_in']
             elif self.da_dimension == 6:
                 view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
+        else:
+            view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
+        
         if self.meta.nseeds > 0:
             view_cols += ['seed']
+        
         if self.meta.pairs_shift == 0:
             view_cols += ['nturns', 'state']
             df = self._surv[view_cols]
@@ -132,6 +137,7 @@ class DA:
             df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
             df['state1'] = np.array(self._surv.loc[orig,'state'])
             df['state2'] = np.array(self._surv.loc[~orig,'state'])
+        
         return df.rename(columns = {
                     'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
                     'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
@@ -375,9 +381,10 @@ class DA:
 
         user_provided_coords = [i for i in [x,px, y, py, zeta, delta] if i is not None]
 
-        # check that all provided list have the same length
+        # check that all provided lists have the same length
         assert len({len(i) for i in user_provided_coords}) == 1, 'Mismatch in length of provided lists'
 
+        # replace all unused variables with zero
         x, px, y, py, zeta, delta = [ i if i is not None else 0 for i in [x,px, y, py, zeta, delta]]
 
         # Make all combinations
