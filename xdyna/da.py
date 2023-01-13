@@ -378,9 +378,7 @@ class DA:
         # check that all provided list have the same length
         assert len({len(i) for i in user_provided_coords}) == 1, 'Mismatch in length of provided lists'
 
-        for i in [x,px, y, py, zeta, delta]:
-            if i is None:
-                i=np.array([0])
+        x, px, y, py, zeta, delta = [ i if i is not None else 0 for i in [x,px, y, py, zeta, delta]]
 
         # Make all combinations
         if self.meta.nseeds > 0:
