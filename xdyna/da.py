@@ -971,7 +971,7 @@ class DA:
         boundary=pd.DataFrame(boundary)
         
         # TODO: Check if lost particle inside boundary
-        boundary_fit=
+#         boundary_fit=generate_polar_interpolation(boundary.angle, boundary.amplitude)
         
         # Save and return DA
         self._da=boundary;  write_da()
@@ -1245,6 +1245,7 @@ def get_da_evo_radial(files):
     
 
 def generate_polar_interpolation(DA_angle, DA_amplitude, ang_min,ang_max):
+    ang_min=min(DA_angle) ; ang_max=max(DA_angle)
     sort=np.argsort(DA_angle)
     angle = DA_angle[sort]; radius = DA_amplitude[sort]; 
     if min(DA_angle)< -170 and max(DA_angle)>170:
