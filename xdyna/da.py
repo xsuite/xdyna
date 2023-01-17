@@ -956,7 +956,7 @@ class DA:
             section=data.loc[data.round_angle==ang,:]
             
             # Identify losses and surviving particles
-            losses =section.turns<DA.max_turns
+            losses =section.nturns<self.max_turns
             # TODO: Detect double wall losses
             section_loss=section.loc[ losses,:]
             section_surv=section.loc[~losses,:]
@@ -971,10 +971,10 @@ class DA:
         boundary=pd.DataFrame(boundary)
         
         # TODO: Check if lost particle inside boundary
-#         boundary_fit=generate_polar_interpolation(boundary.angle, boundary.amplitude)
+#         boundary_fit=polar_interpolation(boundary.angle, boundary.amplitude)
         
         # Save and return DA
-        self._da=boundary;  write_da()
+        self._da=boundary.loc[:,['angle','amplitude']];  self.write_da()
         return self._da
 
 
@@ -1244,7 +1244,7 @@ def get_da_evo_radial(files):
     return _calculate_radial_evo(_get_raw_da_radial(data))
     
 
-def generate_polar_interpolation(DA_angle, DA_amplitude, ang_min,ang_max):
+def polar_interpolation(DA_angle, DA_amplitude):
     ang_min=min(DA_angle) ; ang_max=max(DA_angle)
     sort=np.argsort(DA_angle)
     angle = DA_angle[sort]; radius = DA_amplitude[sort]; 
