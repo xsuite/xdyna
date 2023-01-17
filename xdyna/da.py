@@ -931,12 +931,51 @@ class DA:
 
     # Not allowed on parallel process
     def calculate_da(self):
+        data=self.survival_data.copy()
         if self.da_type == 'radial':
-            pass
+            data['round_angle']= data['angle']
+            
+#             pass
         elif self.da_type == 'grid':
-            pass
+            data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
+            data['amplitude']  = np.abs(  data['x']+1j*data['y'])
+            data['round_angle']= np.round(data['angle'],decimals=0.5)
+            
+#             pass
         elif self.da_type in ['monte_carlo', 'free']:
-            pass # ML
+            data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
+            data['amplitude']  = np.abs(  data['x']+1j*data['y'])
+            data['round_angle']= np.round(data['angle'],decimals=0.5)
+            
+#             pass # ML
+
+        # Get a raw DA estimation from losses
+        boundary={'round_angle':[],'angle':[],'amplitude':[]}
+        for ang in np.unique(data['round_angle']):
+            # Select angulare slice
+            section=data.loc[data.round_angle==ang,:]
+            
+            # Identify losses and surviving particles
+            losses =section.turns<DA.max_turns
+            # TODO: Detect double wall losses
+            section_loss=section.loc[ losses,:]
+            section_surv=section.loc[~losses,:]
+            
+            # Detect DA boundary
+            min_amplitude_loss=min(section_loss.amplitude)
+            max_amplitude_surv=max(section_surv.amplitude[section_surv.amplitude<min_amplitude_loss])
+
+            boundary['round_angle'].append(ang)
+            boundary['amplitude'].append(max_amplitude_surv)
+            boundary['angle'].append(section_surv.loc[section_surv.amplitude==max_amplitude_surv,'angle'].values[0])
+        boundary=pd.DataFrame(boundary)
+        
+        # TODO: Check if lost particle inside boundary
+        boundary_fit=
+        
+        # Save and return DA
+        self._da=boundary;  write_da()
+        return self._da
 
 
     # =================================================================
@@ -1205,5 +1244,15 @@ def get_da_evo_radial(files):
     return _calculate_radial_evo(_get_raw_da_radial(data))
     
 
+def generate_polar_interpolation(DA_angle, DA_amplitude, ang_min,ang_max):
+    sort=np.argsort(DA_angle)
+    angle = DA_angle[sort]; radius = DA_amplitude[sort]; 
+    if min(DA_angle)< -170 and max(DA_angle)>170:
+        angle=np.append(angle,[-180]); radius=np.append(radius,[radius[0]])
+        angle=np.append(angle,[ 180]); radius=np.append(radius,[radius[0]])
+    else:
+        angle=np.append(angle,[ang_min]); radius=np.append(radius,[radius[0]])
+        angle=np.append(angle,[ang_max]); radius=np.append(radius,[radius[0]])
 
+    return interpolate.interp1d(angle, radius)
 
