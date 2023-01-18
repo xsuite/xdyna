@@ -939,18 +939,19 @@ class DA:
         elif self.da_type == 'grid':
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-            data['round_angle']= np.round(data['angle'],decimals=0.5)
+            data['round_angle']= np.round(data['angle']*0.1)*10
             
 #             pass
         elif self.da_type in ['monte_carlo', 'free']:
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-            data['round_angle']= np.round(data['angle'],decimals=0.5)
+            data['round_angle']= np.round(data['angle']*0.1)*10
             
 #             pass # ML
 
         # Get a raw DA estimation from losses
-        boundary={'round_angle':[],'angle':[],'amplitude':[]}
+        da={'round_angle':[],'angle':[],'amplitude':[]}
+#         angles_losses=np.unique(data['round_angle'])
         for ang in np.unique(data['round_angle']):
             # Select angulare slice
             section=data.loc[data.round_angle==ang,:]
@@ -965,13 +966,43 @@ class DA:
             min_amplitude_loss=min(section_loss.amplitude)
             max_amplitude_surv=max(section_surv.amplitude[section_surv.amplitude<min_amplitude_loss])
 
-            boundary['round_angle'].append(ang)
-            boundary['amplitude'].append(max_amplitude_surv)
-            boundary['angle'].append(section_surv.loc[section_surv.amplitude==max_amplitude_surv,'angle'].values[0])
-        boundary=pd.DataFrame(boundary)
+#             da['round_angle'].append(ang)
+            da['amplitude'].append(max_amplitude_surv)
+            da['angle'].append(section_surv.loc[section_surv.amplitude==max_amplitude_surv,'angle'].values[0])
+            
+        da=pd.DataFrame(da)
         
-        # TODO: Check if lost particle inside boundary
-#         boundary_fit=polar_interpolation(boundary.angle, boundary.amplitude)
+        if self.da_type in ['monte_carlo', 'free']:
+            da_fit=polar_interpolation(da.angle, da.amplitude)
+            
+            losses =data.nturns<self.max_turns
+            section_loss=data.loc[ losses,:]
+            section_surv=data.loc[~losses,:]
+            
+            # Check if losses inside DA boundary (to be tested)
+            section_loss_in_DA = section_loss.loc[section_loss.amplitude<=da_fit(section_loss.angle),:]
+            if not section_loss_in_DA.empty:
+                for idx, loss_row in section_loss_in_DA.iterrows():
+                    surv_amp_diff = np.abs((section_surv.angle[].x-row.x) + 1j*(section_surv.y-row.y))
+                    idx_surv = section_surv.index.tolist()[np.argsort(surv_amp_diff)]
+                    
+                    da_fit_tmp=da_fit
+                    da_tmp ={'round_angle':[],'angle':[],'amplitude':[]}
+                    it = 0;
+                    while it < len(sorted_idx_surv) and row.amplitude<=boundary_fit_tmp(row.angle):
+                        candidate=section_surv.loc[idx_surv[it],:]
+                        da_tmp['angle']    =np.append(da['angle'],    [candidate.angle])
+                        da_tmp['amplitude']=np.append(da['amplitude'],[candidate.amplitude])
+                        da_fit_tmp=polar_interpolation(da_tmp.angle, da_tmp.amplitude)
+                        
+                        it+=1
+                        
+                    if row.amplitude>da_fit_tmp(row.angle):
+                        da=da_tmp
+                        da_fit=da_fit_tmp
+
+
+            # Smooth DA
         
         # Save and return DA
         self._da=boundary.loc[:,['angle','amplitude']];  self.write_da()
@@ -1248,12 +1279,14 @@ def polar_interpolation(DA_angle, DA_amplitude):
     ang_min=min(DA_angle) ; ang_max=max(DA_angle)
     sort=np.argsort(DA_angle)
     angle = DA_angle[sort]; radius = DA_amplitude[sort]; 
-    if min(DA_angle)< -170 and max(DA_angle)>170:
-        angle=np.append(angle,[-180]); radius=np.append(radius,[radius[0]])
+    if ang_min<-170 and ang_max>170:
+        angle=np.append([-180],angle); radius=np.append([radius[0]],radius)
         angle=np.append(angle,[ 180]); radius=np.append(radius,[radius[0]])
     else:
-        angle=np.append(angle,[ang_min]); radius=np.append(radius,[radius[0]])
-        angle=np.append(angle,[ang_max]); radius=np.append(radius,[radius[0]])
+        angle=np.append([np.floor(ang_min)-5],angle); radius=np.append([radius[0]],radius)
+        angle=np.append(angle,[np.ceil(ang_max)+5]);  radius=np.append(radius,[radius[-1]])
+        
+#     print(angle) 
 
     return interpolate.interp1d(angle, radius)
 
