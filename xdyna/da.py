@@ -1232,7 +1232,119 @@ class DA:
     # =================================================================
     # ============================ Plot DA ============================
     # =================================================================
+
+    def plot_particles(self,ax, at_turn=None, type_plot="polar", show_surviving=True, show_losses=True, closses="red", csurviving="blue", size_scaling="linear",alpha=1):
+        """
+        Scattor plot of the lost and surviving particles.
+        
+        Inputs:
+          * at_turn: all particles surviving at least this number of turns are considered as surviving.
+          * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
+          * show_surviving: Plot surviving particles if true (Default=True).
+          * show_losses: Plot lost particles if true (Default=True).
+          * csurviving: Color of surviving dots (Default="blue").
+          * closses: Color of losses dots (Default="red").
+          * size_scaling: Type of losses dot scaling (Default="linear"). There are 3 options: "linear", "log", None.
+        """
+        
+        if at_turn==None:
+            at_turn=self.max_turns
+            
+        if self.survival_data==None:
+            raise ValueError('Run the simulation before using plot_particles.')
+            
+        data = DA.survival_data.copy()
+        if type_plot="polar":
+            if ["angle","amplitude"] not in DA.survival_data:
+                data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
+                data['amplitude']= np.abs(  data['x']+1j*data['y'])
+                
+            if show_surviving:
+                surv=data.loc[data['nturns']>=at_turn,:]
+                ax.scatter(surv['angle'],surv['amplitude'],color=csurviving,alpha=alpha,label="Surv.")
+            if show_losses:
+                loss=data.loc[data['nturns']<at_turn,:]
+                
+                if size_scaling=="linear":
+                    size=data['nturns']/at_turn
+                elif size_scaling=="log":
+                    size=np.log10(data['nturns'])/np.log10(at_turn)
+                else:
+                    size=None
+                ax.scatter(loss['angle'],loss['amplitude'],size,color=closses,alpha=alpha,label="Loss.")
+                
+                ax.set_xlabel(r'angle [$^{\circ}$]')
+                ax.set_ylabel(r'amplitude [$\sigma$]')
+                
+        elif type_plot="cartesian":
+            if ["x","y"] not in DA.survival_data:
+                data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
+                data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
+                
+            if show_surviving:
+                surv=data.loc[data['nturns']>=at_turn,:]
+                ax.scatter(surv['x'],surv['y'],color=csurviving,alpha=alpha,label="Surv.")
+            if show_losses:
+                loss=data.loc[data['nturns']<at_turn,:]
+                
+                if size_scaling=="linear":
+                    size=data['nturns']/at_turn
+                elif size_scaling=="log":
+                    size=np.log10(data['nturns'])/np.log10(at_turn)
+                else:
+                    size=None
+                ax.scatter(loss['x'],loss['y'],size,color=closses,alpha=alpha,label="Loss.")
+                
+                ax.set_xlabel(r'angle [$^{\circ}$]')
+                ax.set_ylabel(r'amplitude [$\sigma$]')
+            
+        else:
+            raise ValueError('type_plot can only be either "polar" or "cartesian".')
+
+            
+    def plot_da_border(self,ax, at_turn=None, type_plot="polar", color="blue", ls='-', linestyle=None, alpha=1, label="DA"):
+        """
+        Plot the DA border.
+        
+        Inputs:
+          * at_turn: all particles surviving at least this number of turns are considered as surviving.
+          * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
+          * color: Color of losses dots (Default="red").
+        """
+        
+        if at_turn==None:
+            at_turn=self.max_turns
+            
+        if self.survival_data==None:
+            raise ValueError('Run the simulation before using plot_particles.')
+            
     
+        data = self._da_border.copy()
+        if type_plot="polar":
+            
+            if linestyle==None:
+                ax.plot(surv['angle'],surv['amplitude'],ls=ls,color=color,alpha=alpha,label=label)
+            else:
+                ax.plot(surv['angle'],surv['amplitude'],linestyle=linestyle,color=color,alpha=alpha,label=label)
+
+            ax.set_xlabel(r'angle [$^{\circ}$]')
+            ax.set_ylabel(r'amplitude [$\sigma$]')
+                
+        elif type_plot="cartesian":
+            if ["x","y"] not in DA.survival_data:
+                data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
+                data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
+            
+            if linestyle==None:
+                ax.plot(surv['x'],surv['y'],ls=ls,color=color,alpha=alpha,label=label)
+            else:
+                ax.plot(surv['x'],surv['y'],linestyle=linestyle,color=color,alpha=alpha,label=label)
+                
+            ax.set_xlabel(r'angle [$^{\circ}$]')
+            ax.set_ylabel(r'amplitude [$\sigma$]')
+            
+        else:
+            raise ValueError('type_plot can only be either "polar" or "cartesian".')
     
     # =================================================================
  
