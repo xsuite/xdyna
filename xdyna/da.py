@@ -73,6 +73,7 @@ class DA:
         self.memory_threshold = kwargs.pop('memory_threshold', 1e9)
         self._surv = None
         self._da = None
+        self._da_border = None
         self._da_evol = None
         self._active_job = -1
         self._active_job_log = {}
@@ -930,7 +931,7 @@ class DA:
 
 
     # Not allowed on parallel process
-    def calculate_da(self):
+    def calculate_da(self,angular_precision=1):
         data=self.survival_data.copy()
         if self.da_type == 'radial':
             data['round_angle']= data['angle']
@@ -939,18 +940,19 @@ class DA:
         elif self.da_type == 'grid':
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-            data['round_angle']= np.round(data['angle']*0.1)*10
+            data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
             
 #             pass
         elif self.da_type in ['monte_carlo', 'free']:
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-            data['round_angle']= np.round(data['angle']*0.1)*10
+            data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
             
 #             pass # ML
 
         # Get a raw DA estimation from losses
-        da={'round_angle':[],'angle':[],'amplitude':[]}
+        border_max={'angle':[],'amplitude':[]}
+        border_min={'angle':[],'amplitude':[]}
 #         angles_losses=np.unique(data['round_angle'])
         for ang in np.unique(data['round_angle']):
             # Select angulare slice
@@ -963,50 +965,68 @@ class DA:
             section_surv=section.loc[~losses,:]
             
             # Detect DA boundary
-            min_amplitude_loss=min(section_loss.amplitude)
-            max_amplitude_surv=max(section_surv.amplitude[section_surv.amplitude<min_amplitude_loss])
+            if not section_loss.empty and not section_surv.empty:
+                min_amplitude_loss=min(section_loss.amplitude)
+                border_max['amplitude'].append(min_amplitude_loss)
+                border_max['angle'].append(section_loss.loc[section_loss.amplitude==min_amplitude_loss,'angle'].values[0])
+                    
+                mask = section_surv.amplitude<min_amplitude_loss
+                if any(mask):
+                    max_amplitude_surv=max(section_surv.amplitude[mask])
 
-#             da['round_angle'].append(ang)
-            da['amplitude'].append(max_amplitude_surv)
-            da['angle'].append(section_surv.loc[section_surv.amplitude==max_amplitude_surv,'angle'].values[0])
+                    border_min['amplitude'].append(max_amplitude_surv)
+                    border_min['angle'].append(section_surv.loc[section_surv.amplitude==max_amplitude_surv,'angle'].values[0])
+            elif not section_loss.empty:
+                min_amplitude_loss=min(section_loss.amplitude)
+                border_max['amplitude'].append(min_amplitude_loss)
+                border_max['angle'].append(section_loss.loc[section_loss.amplitude==min_amplitude_loss,'angle'].values[0])
+            elif not section_surv.empty:
+                max_amplitude_surv=max(section_surv.amplitude)
+
+                border_min['amplitude'].append(max_amplitude_surv)
+                border_min['angle'].append(section_surv.loc[section_surv.amplitude==max_amplitude_surv,'angle'].values[0])
             
-        da=pd.DataFrame(da)
+        border_max=pd.DataFrame(border_max)
+        border_min=pd.DataFrame(border_min)
         
         if self.da_type in ['monte_carlo', 'free']:
-            da_fit=polar_interpolation(da.angle, da.amplitude)
+            border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude)
             
             losses =data.nturns<self.max_turns
             section_loss=data.loc[ losses,:]
             section_surv=data.loc[~losses,:]
             
             # Check if losses inside DA boundary (to be tested)
-            section_loss_in_DA = section_loss.loc[section_loss.amplitude<=da_fit(section_loss.angle),:]
+            section_loss_in_DA = section_loss.loc[section_loss.amplitude<=border_min_fit(section_loss.angle),:]
             if not section_loss_in_DA.empty:
                 for idx, loss_row in section_loss_in_DA.iterrows():
-                    surv_amp_diff = np.abs((section_surv.angle[].x-row.x) + 1j*(section_surv.y-row.y))
+                    border_min['amplitude'].append(loss_row.amplitude)
+                    border_min['angle'].append(loss_row.angle)
+                    
+                    surv_amp_diff = np.abs((section_surv.x-row.x) + 1j*(section_surv.y-row.y))
                     idx_surv = section_surv.index.tolist()[np.argsort(surv_amp_diff)]
                     
-                    da_fit_tmp=da_fit
-                    da_tmp ={'round_angle':[],'angle':[],'amplitude':[]}
+                    border_min_fit_tmp=border_min_fit
+                    border_min_tmp ={'angle':[],'amplitude':[]}
                     it = 0;
-                    while it < len(sorted_idx_surv) and row.amplitude<=boundary_fit_tmp(row.angle):
+                    while it < len(sorted_idx_surv) and row.amplitude<=border_min_fit_tmp(row.angle):
                         candidate=section_surv.loc[idx_surv[it],:]
-                        da_tmp['angle']    =np.append(da['angle'],    [candidate.angle])
-                        da_tmp['amplitude']=np.append(da['amplitude'],[candidate.amplitude])
-                        da_fit_tmp=polar_interpolation(da_tmp.angle, da_tmp.amplitude)
+                        border_min_tmp['angle']    =np.append(border_min['angle'],    [candidate.angle])
+                        border_min_tmp['amplitude']=np.append(border_min['amplitude'],[candidate.amplitude])
+                        border_min_fit_tmp=polar_interpolation(border_min_tmp.angle, border_min_tmp.amplitude)
                         
                         it+=1
                         
-                    if row.amplitude>da_fit_tmp(row.angle):
-                        da=da_tmp
-                        da_fit=da_fit_tmp
+                    if row.amplitude>border_min_fit_tmp(row.angle):
+                        border_min=border_min_tmp
+                        border_min_fit=border_min_fit_tmp
 
 
             # Smooth DA
         
         # Save and return DA
-        self._da=boundary.loc[:,['angle','amplitude']];  self.write_da()
-        return self._da
+        self._da_border=border_min.loc[:,['angle','amplitude']];  #self.write_da()
+        return self._da_border,border_max
 
 
     # =================================================================
