@@ -428,7 +428,7 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_initial_random(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=None,
+    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=None,
                                 ang_max=None, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
         """
