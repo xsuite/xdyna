@@ -1025,7 +1025,7 @@ class DA:
             # Smooth DA
         
         # Save and return DA
-        self._da_border=border_min.loc[:,['angle','amplitude']];  #self.write_da()
+        self._da_border={self.max_turns:border_min.loc[:,['angle','amplitude']]};  #self.write_da()
         return self._da_border,border_max
 
 
