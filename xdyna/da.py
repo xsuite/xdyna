@@ -1247,15 +1247,15 @@ class DA:
           * size_scaling: Type of losses dot scaling (Default="linear"). There are 3 options: "linear", "log", None.
         """
         
-        if at_turn==None:
+        if at_turn is None:
             at_turn=self.max_turns
             
-        if self.survival_data==None:
+        if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
             
-        data = DA.survival_data.copy()
+        data = self.survival_data.copy()
         if type_plot=="polar":
-            if ["angle","amplitude"] not in DA.survival_data:
+            if "angle" not in data.columns or "amplitude" not in data.columns:
                 data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
                 data['amplitude']= np.abs(  data['x']+1j*data['y'])
                 
@@ -1263,21 +1263,23 @@ class DA:
                 surv=data.loc[data['nturns']>=at_turn,:]
                 ax.scatter(surv['angle'],surv['amplitude'],color=csurviving,alpha=alpha,label="Surv.")
             if show_losses:
+                import matplotlib.pyplot as plt
+                
                 loss=data.loc[data['nturns']<at_turn,:]
                 
                 if size_scaling=="linear":
-                    size=data['nturns']/at_turn
+                    size=(loss['nturns'].to_numpy()/at_turn) * plt.rcParams['lines.markersize']
                 elif size_scaling=="log":
-                    size=np.log10(data['nturns'])/np.log10(at_turn)
+                    size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
                 else:
                     size=None
-                ax.scatter(loss['angle'],loss['amplitude'],size,color=closses,alpha=alpha,label="Loss.")
+                ax.scatter(loss['angle'],loss['amplitude'],size**2,color=closses,alpha=alpha,label="Loss.")
                 
                 ax.set_xlabel(r'angle [$^{\circ}$]')
                 ax.set_ylabel(r'amplitude [$\sigma$]')
                 
         elif type_plot=="cartesian":
-            if ["x","y"] not in DA.survival_data:
+            if "x" not in data.columns or "y" not in data.columns:
                 data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
                 data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
                 
@@ -1285,15 +1287,17 @@ class DA:
                 surv=data.loc[data['nturns']>=at_turn,:]
                 ax.scatter(surv['x'],surv['y'],color=csurviving,alpha=alpha,label="Surv.")
             if show_losses:
+                import matplotlib.pyplot as plt
+                
                 loss=data.loc[data['nturns']<at_turn,:]
                 
                 if size_scaling=="linear":
-                    size=data['nturns']/at_turn
+                    size=(loss['nturns'].to_numpy()/at_turn) * plt.rcParams['lines.markersize']
                 elif size_scaling=="log":
-                    size=np.log10(data['nturns'])/np.log10(at_turn)
+                    size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
                 else:
                     size=None
-                ax.scatter(loss['x'],loss['y'],size,color=closses,alpha=alpha,label="Loss.")
+                ax.scatter(loss['x'],loss['y'],size**2,color=closses,alpha=alpha,label="Loss.")
                 
                 ax.set_xlabel(r'x [$\sigma$]')
                 ax.set_ylabel(r'y [$\sigma$]')
@@ -1312,33 +1316,32 @@ class DA:
           * color: Color of losses dots (Default="red").
         """
         
-        if at_turn==None:
+        if at_turn is None:
             at_turn=self.max_turns
             
-        if self.survival_data==None:
+        if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
             
     
-        data = self._da_border.copy()
+        data = self._da_border.copy()[at_turn]
         if type_plot=="polar":
             
-            if linestyle==None:
-                ax.plot(surv['angle'],surv['amplitude'],ls=ls,color=color,alpha=alpha,label=label)
+            if linestyle is None:
+                ax.plot(data['angle'],data['amplitude'],ls=ls,color=color,alpha=alpha,label=label)
             else:
-                ax.plot(surv['angle'],surv['amplitude'],linestyle=linestyle,color=color,alpha=alpha,label=label)
+                ax.plot(data['angle'],data['amplitude'],linestyle=linestyle,color=color,alpha=alpha,label=label)
 
             ax.set_xlabel(r'angle [$^{\circ}$]')
             ax.set_ylabel(r'amplitude [$\sigma$]')
                 
         elif type_plot=="cartesian":
-            if ["x","y"] not in DA.survival_data:
-                data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
-                data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
+            data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
+            data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
             
-            if linestyle==None:
-                ax.plot(surv['x'],surv['y'],ls=ls,color=color,alpha=alpha,label=label)
+            if linestyle is None:
+                ax.plot(data['x'],data['y'],ls=ls,color=color,alpha=alpha,label=label)
             else:
-                ax.plot(surv['x'],surv['y'],linestyle=linestyle,color=color,alpha=alpha,label=label)
+                ax.plot(data['x'],data['y'],linestyle=linestyle,color=color,alpha=alpha,label=label)
                 
             ax.set_xlabel(r'angle [$^{\circ}$]')
             ax.set_ylabel(r'amplitude [$\sigma$]')
