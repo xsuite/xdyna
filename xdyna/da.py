@@ -1235,7 +1235,7 @@ class DA:
 
     def plot_particles(self,ax, at_turn=None, type_plot="polar", show_surviving=True, show_losses=True, closses="red", csurviving="blue", size_scaling="linear",alpha=1):
         """
-        Scattor plot of the lost and surviving particles.
+        Scatter plot of the lost and surviving particles.
         
         Inputs:
           * at_turn: all particles surviving at least this number of turns are considered as surviving.
@@ -1254,7 +1254,7 @@ class DA:
             raise ValueError('Run the simulation before using plot_particles.')
             
         data = DA.survival_data.copy()
-        if type_plot="polar":
+        if type_plot=="polar":
             if ["angle","amplitude"] not in DA.survival_data:
                 data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
                 data['amplitude']= np.abs(  data['x']+1j*data['y'])
@@ -1276,7 +1276,7 @@ class DA:
                 ax.set_xlabel(r'angle [$^{\circ}$]')
                 ax.set_ylabel(r'amplitude [$\sigma$]')
                 
-        elif type_plot="cartesian":
+        elif type_plot=="cartesian":
             if ["x","y"] not in DA.survival_data:
                 data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
                 data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
@@ -1295,8 +1295,8 @@ class DA:
                     size=None
                 ax.scatter(loss['x'],loss['y'],size,color=closses,alpha=alpha,label="Loss.")
                 
-                ax.set_xlabel(r'angle [$^{\circ}$]')
-                ax.set_ylabel(r'amplitude [$\sigma$]')
+                ax.set_xlabel(r'x [$\sigma$]')
+                ax.set_ylabel(r'y [$\sigma$]')
             
         else:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
@@ -1320,7 +1320,7 @@ class DA:
             
     
         data = self._da_border.copy()
-        if type_plot="polar":
+        if type_plot=="polar":
             
             if linestyle==None:
                 ax.plot(surv['angle'],surv['amplitude'],ls=ls,color=color,alpha=alpha,label=label)
@@ -1330,7 +1330,7 @@ class DA:
             ax.set_xlabel(r'angle [$^{\circ}$]')
             ax.set_ylabel(r'amplitude [$\sigma$]')
                 
-        elif type_plot="cartesian":
+        elif type_plot=="cartesian":
             if ["x","y"] not in DA.survival_data:
                 data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
                 data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
