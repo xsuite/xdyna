@@ -1233,7 +1233,7 @@ class DA:
     # ============================ Plot DA ============================
     # =================================================================
 
-    def plot_particles(self,ax, at_turn=None, type_plot="polar", show_surviving=True, show_losses=True, closses="red", csurviving="blue", size_scaling="linear",alpha=1):
+    def plot_particles(self,ax, at_turn=None, type_plot="polar", show_surviving=True, show_losses=True, closses="red", csurviving="blue", size_scaling="log",alpha=1):
         """
         Scatter plot of the lost and surviving particles.
         
@@ -1244,7 +1244,7 @@ class DA:
           * show_losses: Plot lost particles if true (Default=True).
           * csurviving: Color of surviving dots (Default="blue").
           * closses: Color of losses dots (Default="red").
-          * size_scaling: Type of losses dot scaling (Default="linear"). There are 3 options: "linear", "log", None.
+          * size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
         """
         
         if at_turn is None:
