@@ -73,7 +73,8 @@ class DA:
         self.memory_threshold = kwargs.pop('memory_threshold', 1e9)
         self._surv = None
         self._da = None
-        self._da_border = None
+        self._da_border_min = None
+        self._da_border_max = None
         self._da_evol = None
         self._active_job = -1
         self._active_job_log = {}
@@ -143,6 +144,10 @@ class DA:
     @property
     def da_type(self):
         return self.meta.da_type
+
+    @property
+    def da_border(self):
+        return self._da_border_min
 
     @property
     def da_dimension(self):
@@ -990,7 +995,7 @@ class DA:
         border_min=pd.DataFrame(border_min)
         
         if self.da_type in ['monte_carlo', 'free']:
-            border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude)
+            border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=[min(data.angle),max(data.angle)])
             
             losses =data.nturns<self.max_turns
             section_loss=data.loc[ losses,:]
@@ -1025,8 +1030,9 @@ class DA:
             # Smooth DA
         
         # Save and return DA
-        self._da_border={self.max_turns:border_min.loc[:,['angle','amplitude']]};  #self.write_da()
-        return self._da_border,border_max
+        self._da_border_min={self.max_turns:border_min.loc[:,['angle','amplitude']]};  #self.write_da()
+        self._da_border_max={self.max_turns:border_max.loc[:,['angle','amplitude']]};  #self.write_da()
+        return self._da_border_min,self._da_border_max
 
 
     # =================================================================
@@ -1313,7 +1319,7 @@ class DA:
         Inputs:
           * at_turn: all particles surviving at least this number of turns are considered as surviving.
           * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
-          * color: Color of losses dots (Default="red").
+          * color: Color of the line (Default="blue").
         """
         
         if at_turn is None:
@@ -1323,7 +1329,7 @@ class DA:
             raise ValueError('Run the simulation before using plot_particles.')
             
     
-        data = self._da_border.copy()[at_turn]
+        data = self._da_border_min.copy()[at_turn]
         if type_plot=="polar":
             
             if linestyle is None:
@@ -1410,8 +1416,9 @@ def get_da_evo_radial(files):
     return _calculate_radial_evo(_get_raw_da_radial(data))
     
 
-def polar_interpolation(DA_angle, DA_amplitude):
-    ang_min=min(DA_angle) ; ang_max=max(DA_angle)
+def polar_interpolation(DA_angle, DA_amplitude, angle_range):
+    ang_min=min([angle_range[0],min(DA_angle)]) ; ang_max=max([angle_range[1],max(DA_angle)])
+    
     sort=np.argsort(DA_angle)
     angle = DA_angle[sort]; radius = DA_amplitude[sort]; 
     if ang_min<-170 and ang_max>170:
@@ -1420,8 +1427,5 @@ def polar_interpolation(DA_angle, DA_amplitude):
     else:
         angle=np.append([np.floor(ang_min)-5],angle); radius=np.append([radius[0]],radius)
         angle=np.append(angle,[np.ceil(ang_max)+5]);  radius=np.append(radius,[radius[-1]])
-        
-#     print(angle) 
-
     return interpolate.interp1d(angle, radius)
 
