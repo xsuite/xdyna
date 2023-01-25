@@ -936,8 +936,12 @@ class DA:
 
 
     # Not allowed on parallel process
-    def calculate_da(self,angular_precision=1):
+    def calculate_da(self,at_turn=None,angular_precision=1):
         data=self.survival_data.copy()
+        
+        if at_turn is None:
+            at_turn=self.max_turns
+        
         if self.da_type == 'radial':
             data['round_angle']= data['angle']
             
@@ -964,7 +968,7 @@ class DA:
             section=data.loc[data.round_angle==ang,:]
             
             # Identify losses and surviving particles
-            losses =section.nturns<self.max_turns
+            losses =section.nturns<at_turn
             # TODO: Detect double wall losses
             section_loss=section.loc[ losses,:]
             section_surv=section.loc[~losses,:]
@@ -997,7 +1001,7 @@ class DA:
         if self.da_type in ['monte_carlo', 'free']:
             border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=[min(data.angle),max(data.angle)])
             
-            losses =data.nturns<self.max_turns
+            losses =data.nturns<at_turn
             section_loss=data.loc[ losses,:]
             section_surv=data.loc[~losses,:]
             
@@ -1030,8 +1034,8 @@ class DA:
             # Smooth DA
         
         # Save and return DA
-        self._da_border_min={self.max_turns:border_min.loc[:,['angle','amplitude']]};  #self.write_da()
-        self._da_border_max={self.max_turns:border_max.loc[:,['angle','amplitude']]};  #self.write_da()
+        self._da_border_min={at_turn:border_min.loc[:,['angle','amplitude']]};  #self.write_da()
+        self._da_border_max={at_turn:border_max.loc[:,['angle','amplitude']]};  #self.write_da()
         return self._da_border_min,self._da_border_max
 
 
