@@ -945,19 +945,22 @@ class DA:
         if self.da_type == 'radial':
             data['round_angle']= data['angle']
             
-#             pass
         elif self.da_type == 'grid':
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
             data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
             
-#             pass
         elif self.da_type in ['monte_carlo', 'free']:
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
             data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
             
-#             pass # ML
+        # Detect range to look at the DA border
+        losses =data.nturns<at_turn
+        loss=data.loc[ losses,:]; min_loss=min(loss.amplitude)
+        surv=data.loc[~losses,:]; max_surv=max(surv.amplitude)
+        min_amplitude = min([min_loss,max_surv])-2
+        max_amplitude = max([min_loss,max_surv])+2
 
         # Get a raw DA estimation from losses
         border_max={'angle':[],'amplitude':[]}
@@ -970,8 +973,8 @@ class DA:
             # Identify losses and surviving particles
             losses =section.nturns<at_turn
             # TODO: Detect double wall losses
-            section_loss=section.loc[ losses,:]
-            section_surv=section.loc[~losses,:]
+            section_loss=section.loc[ losses,:]; section_loss=section_loss.loc[section_loss.amplitude<=max_amplitude,:]
+            section_surv=section.loc[~losses,:]; section_surv=section_surv.loc[section_surv.amplitude>=min_amplitude,:]
             
             # Detect DA boundary
             if not section_loss.empty and not section_surv.empty:
