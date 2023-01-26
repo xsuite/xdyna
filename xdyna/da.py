@@ -1025,7 +1025,7 @@ class DA:
                         candidate=section_surv.loc[idx_surv[it],:]
                         border_min_tmp['angle']    =np.append(border_min['angle'],    [candidate.angle])
                         border_min_tmp['amplitude']=np.append(border_min['amplitude'],[candidate.amplitude])
-                        border_min_fit_tmp=polar_interpolation(border_min_tmp.angle, border_min_tmp.amplitude)
+                        border_min_fit_tmp=polar_interpolation(border_min_tmp.angle, border_min_tmp.amplitude, angle_range=[min(data.angle),max(data.angle)])
                         
                         it+=1
                         
@@ -1035,11 +1035,68 @@ class DA:
 
 
             # Smooth DA
+#             self._da_smoothing(border_min,border_max,at_turn=at_turn)
         
         # Save and return DA
         self._da_border_min={at_turn:border_min.loc[:,['angle','amplitude']]};  #self.write_da()
         self._da_border_max={at_turn:border_max.loc[:,['angle','amplitude']]};  #self.write_da()
         return self._da_border_min,self._da_border_max
+
+
+    
+    # Not allowed on parallel process
+    def _da_smoothing(self,raw_border_min,raw_border_max,at_turn=None):
+        
+        data=self.survival_data.copy()
+        if 'angle' not in data.columns or 'amplitude' not in data.columns:
+            data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
+            data['amplitude']  = np.abs(  data['x']+1j*data['y'])
+        ang_range=(min(data.angle),max(data.angle))
+        
+        if at_turn is None:
+            at_turn=self.max_turns
+            
+            
+        raw_fit_min=polar_interpolation(raw_border_min.angle, raw_border_min.amplitude, angle_range=ang_range)
+        raw_fit_max=polar_interpolation(raw_border_max.angle, raw_border_max.amplitude, angle_range=ang_range)
+        raw_da_min =compute_da(raw_border_min.angle, raw_border_min.amplitude)
+        raw_da_max =compute_da(raw_border_max.angle, raw_border_max.amplitude)
+            
+        continue_smoothing=True
+        while continue_smoothing:
+            continue_smoothing=False
+            
+            tmp_border_min=raw_border_min
+#             tmp_border_max=raw_border_max
+#             tmp_fit_min=raw_fit_min
+#             tmp_fit_max=raw_fit_max
+#             tmp_da_min =raw_da_min
+#             tmp_da_max =raw_da_max
+            
+            # Check if surviving particles outside min DA border can be added to the border 
+            # without having losses inside.
+            surv=data.loc[data.nturns>=at_turn,:];
+            cand=surv.loc[surv.amplitude>raw_fit_min(surv.angle),:]
+#             print('\n\nCheck if surviving particles outside min DA border:')
+#             print(cand)
+#             for c in cand.iterrows():
+                
+            
+            
+            # Check if some min DA border particles could be removed without having losses 
+            # inside.
+            
+            
+            
+            # Check if max DA border cross min DA border, then add particles
+            
+            
+            
+            # Check if some max DA border particles could be removed without cross min DA border 
+            
+            
+            
+        return raw_border_min,raw_border_max
 
 
     # =================================================================
@@ -1422,6 +1479,12 @@ def get_da_evo_radial(files):
     data = pd.concat([ pd.read_csv(file) for file in files ])
     return _calculate_radial_evo(_get_raw_da_radial(data))
     
+    
+    
+    
+def compute_da(angles, amplitudes):
+    sort=np.argsort(angles)
+    return np.sqrt( 2/np.pi*integrate.trapezoid(x=angles[sort]*np.pi/180, y=amplitudes[sort]**2) )
 
 def polar_interpolation(DA_angle, DA_amplitude, angle_range):
     ang_min=min([angle_range[0],min(DA_angle)]) ; ang_max=max([angle_range[1],max(DA_angle)])
