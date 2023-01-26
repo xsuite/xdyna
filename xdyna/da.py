@@ -954,6 +954,7 @@ class DA:
             data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
             data['amplitude']  = np.abs(  data['x']+1j*data['y'])
             data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
+        ang_range=(min(data.angle),max(data.angle))
             
         # Detect range to look at the DA border
         losses =data.nturns<at_turn
@@ -1002,36 +1003,49 @@ class DA:
         border_min=pd.DataFrame(border_min)
         
         if self.da_type in ['monte_carlo', 'free']:
-            border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=[min(data.angle),max(data.angle)])
             
             losses =data.nturns<at_turn
-            section_loss=data.loc[ losses,:]
-            section_surv=data.loc[~losses,:]
+            loss=data.loc[ losses,:]
+            surv=data.loc[~losses,:]
             
-            # Check if losses inside DA boundary (to be tested)
-            section_loss_in_DA = section_loss.loc[section_loss.amplitude<=border_min_fit(section_loss.angle),:]
-            if not section_loss_in_DA.empty:
-                for idx, loss_row in section_loss_in_DA.iterrows():
-                    border_min['amplitude'].append(loss_row.amplitude)
-                    border_min['angle'].append(loss_row.angle)
-                    
-                    surv_amp_diff = np.abs((section_surv.x-row.x) + 1j*(section_surv.y-row.y))
-                    idx_surv = section_surv.index.tolist()[np.argsort(surv_amp_diff)]
-                    
-                    border_min_fit_tmp=border_min_fit
-                    border_min_tmp ={'angle':[],'amplitude':[]}
-                    it = 0;
-                    while it < len(sorted_idx_surv) and row.amplitude<=border_min_fit_tmp(row.angle):
-                        candidate=section_surv.loc[idx_surv[it],:]
-                        border_min_tmp['angle']    =np.append(border_min['angle'],    [candidate.angle])
-                        border_min_tmp['amplitude']=np.append(border_min['amplitude'],[candidate.amplitude])
-                        border_min_fit_tmp=polar_interpolation(border_min_tmp.angle, border_min_tmp.amplitude, angle_range=[min(data.angle),max(data.angle)])
-                        
-                        it+=1
-                        
-                    if row.amplitude>border_min_fit_tmp(row.angle):
-                        border_min=border_min_tmp
-                        border_min_fit=border_min_fit_tmp
+#             loss_in_DA_min = loss.loc[loss.amplitude<=border_min_fit(section_loss.angle),:]
+#             loss_in_DA_max = loss_in_DA_max.loc[min(loss_in_DA_max.index),:]
+#             if not loss_in_DA_min.empty or not loss_in_DA_max.empty:
+
+            # Check if losses lower than max DA boundary
+            border_max_fit=polar_interpolation(border_max.angle, border_max.amplitude, angle_range=ang_range)
+            loss_in_DA_max = loss.loc[loss.amplitude< border_max_fit(loss.angle),:]
+            if not loss_in_DA_max.empty:
+                if len(loss_in_DA_max)==1:
+                    border_max=pd.DataFrame({'angle':np.append(border_max['angle'],[loss_in_DA_max.angle]),
+                                             'amplitude':np.append(border_max['amplitude'],[loss_in_DA_max.amplitude])})
+                elif len(loss_in_DA_max)>1:
+                    border_max=pd.DataFrame({'angle':np.append(border_max['angle'],    [loss_in_DA_max.angle]),
+                                             'amplitude':np.append(border_max['amplitude'],[loss_in_DA_max.amplitude])})
+                
+            # Check if losses lower than min DA boundary [TO BE TESTED]
+            border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=ang_range)
+            loss_in_DA_min = loss.loc[loss.amplitude<=border_min_fit(loss.angle),:]
+            surv_in_da=surv.loc[surv.amplitude<=border_min_fit(surv.angle),:]
+            for idx, loss_row in loss_in_DA_min.iterrows():
+
+                surv_amp_diff = np.abs((surv_in_da.x-loss_row.x) + 1j*(surv_in_da.y-loss_row.y))
+                idx_surv = surv_in_da.index.tolist()[np.argsort(surv_amp_diff)]
+
+                border_min_fit_tmp=border_min_fit
+                border_min_tmp ={'angle':[],'amplitude':[]}
+                it = 0;
+                while it < len(sorted_idx_surv) and loss_row.amplitude<=border_min_fit_tmp(loss_row.angle):
+                    candidate=surv_in_da.loc[idx_surv[it],:]
+                    border_min_tmp['angle']    =np.append(border_min['angle'],    [candidate.angle])
+                    border_min_tmp['amplitude']=np.append(border_min['amplitude'],[candidate.amplitude])
+                    border_min_fit_tmp=polar_interpolation(border_min_tmp.angle, border_min_tmp.amplitude, angle_range=ang_range)
+
+                    it+=1
+
+                if row.amplitude>border_min_fit_tmp(row.angle):
+                    border_min=border_min_tmp
+                    border_min_fit=border_min_fit_tmp
 
 
             # Smooth DA
@@ -1058,10 +1072,6 @@ class DA:
             at_turn=self.max_turns
             
             
-#         raw_fit_min=polar_interpolation(raw_border_min.angle, raw_border_min.amplitude, angle_range=ang_range)
-#         raw_fit_max=polar_interpolation(raw_border_max.angle, raw_border_max.amplitude, angle_range=ang_range)
-#         raw_da_min =compute_da(raw_border_min.angle, raw_border_min.amplitude)
-#         raw_da_max =compute_da(raw_border_max.angle, raw_border_max.amplitude)
         tmp_border_min=raw_border_min
         tmp_border_max=raw_border_max
             
@@ -1103,7 +1113,7 @@ class DA:
 #                     print(tmp_border_min.loc[idx,:])
 #                     print('new_border_min')
 #                     print(new_border_min)
-#                     print('tmp_fit_min')
+#                     print('tmp_border_min')
 #                     print(tmp_border_min)
                     
                     tmp_border_min=new_border_min
@@ -1112,65 +1122,70 @@ class DA:
             tmp_border_min.reset_index(inplace=True, drop=True)
                 
             
+            print('''
+            # Check if surviving particles outside min DA border can be added to the border 
+            # without having losses inside.
+            ''')
+            cand=surv.loc[surv.amplitude>tmp_fit_min(surv.angle),:]
+#             print('\n\nCheck if surviving particles outside min DA border:')
+#             print(cand)
+            for idx, c in cand.iterrows():
+                new_border_min=pd.DataFrame({'angle':np.append(tmp_border_min.angle,[c.angle]),
+                                'amplitude':np.append(tmp_border_min.amplitude,[c.amplitude])})
+                
+                new_fit_min=polar_interpolation(new_border_min.angle, new_border_min.amplitude, ang_range)
+                
+                loss_in_DA = loss.loc[loss.amplitude<=new_fit_min(loss.angle),:]
+                if loss_in_DA.empty:
+#                     print(f'\n\nNew boundary point:'); print(c); print(tmp_border_min)
+                    
+                    tmp_border_min=new_border_min
+                    tmp_fit_min=polar_interpolation(tmp_border_min.angle, tmp_border_min.amplitude, ang_range)
+                    continue_smoothing=True
+                    
+#                     print(tmp_border_min)
+            
+            
 #             print('''
-#             # Check if surviving particles outside min DA border can be added to the border 
-#             # without having losses inside.
+#             # Check if max DA border cross min DA border, then add particles
 #             ''')
-#             cand=surv.loc[surv.amplitude>tmp_fit_min(surv.angle),:]
-# #             print('\n\nCheck if surviving particles outside min DA border:')
-# #             print(cand)
-#             for idx, c in cand.iterrows():
-#                 new_border_min=pd.DataFrame({'angle':np.append(tmp_border_min.angle,[c.angle]),
-#                                 'amplitude':np.append(tmp_border_min.amplitude,[c.amplitude])})
-                
-#                 new_fit_min=polar_interpolation(new_border_min.angle, new_border_min.amplitude, ang_range)
-                
-#                 loss_in_DA = loss.loc[loss.amplitude<=new_fit_min(loss.angle),:]
-#                 if loss_in_DA.empty:
-# #                     print(f'\n\nNew boundary point:'); print(c); print(tmp_border_min)
-                    
-#                     tmp_border_min=new_border_min
-#                     tmp_fit_min=polar_interpolation(tmp_border_min.angle, tmp_border_min.amplitude, ang_range)
-#                     continue_smoothing=True
-                    
-# #                     print(tmp_border_min)
             
             
             print('''
-            # Check if max DA border cross min DA border, then add particles
+            # Check if some max DA border particles could be removed without cross min DA border
             ''')
-            
-            
-#             print('''
-#             # Check if some max DA border particles could be removed without cross min DA border
-#             ''')
-#             surv_in_da=surv.loc[surv.amplitude<=tmp_fit_min(surv.angle),:]
+            surv_in_da=surv.loc[surv.amplitude<=tmp_fit_min(surv.angle),:]
 #             for idx, c in tmp_border_max.loc[np.flip(np.argsort(tmp_border_max.amplitude))].iterrows():
-#                 new_border_max=tmp_border_max.drop(index=idx)
-                
-                
-# #                 print(new_border_min.head(10))
-#                 new_fit_max=polar_interpolation(new_border_max.angle, new_border_max.amplitude, ang_range)
-#                 new_da_max =compute_da(new_border_max.angle, new_border_max.amplitude)
-                
-#                 surv_ex_DA = surv_in_da.loc[surv_in_da.amplitude>new_fit_max(surv_in_da.angle),:]
-#                 loss_in_DA = loss.loc[loss.amplitude<=new_fit_max(loss.angle),:]
-                
-#                 if loss_in_DA.empty and surv_ex_DA.empty and new_da_max<tmp_da_max:
-# #                     print(f'\n\nNew boundary point:'); print(c); print(tmp_border_min)
-# #                     print()
-# #                     print(f'{idx=}')
-# #                     print(c);
-# #                     print('new_border_min')
-# #                     print(new_border_min)
-# #                     print('tmp_fit_min')
-# #                     print(tmp_border_min)
-                    
-#                     tmp_border_max=new_border_max
-#                     tmp_fit_max=polar_interpolation(tmp_border_max.angle, tmp_border_max.amplitude, ang_range)
-#                     tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude)
-#                     continue_smoothing=True
-#             tmp_border_max.reset_index(inplace=True, drop=True)
+            index=tmp_border_max.index[np.flip(np.argsort(tmp_border_max.amplitude))]
+            for idx in index:
+                new_border_max=tmp_border_max.drop(index=idx)
+
+
+#                 print(new_border_max.head(10))
+                new_fit_max=polar_interpolation(new_border_max.angle, new_border_max.amplitude, ang_range)
+                new_da_max =compute_da(new_border_max.angle, new_border_max.amplitude)
+
+                surv_ex_DA = surv_in_da.loc[surv_in_da.amplitude>=new_fit_max(surv_in_da.angle),:]
+                loss_in_DA = loss.loc[loss.amplitude<new_fit_max(loss.angle),:]
+
+#                 print(f'\n{idx=}, ang: {tmp_border_max.loc[idx,"angle"]}    amp :{tmp_border_max.loc[idx,"amplitude"]}')
+#                 print(f'{loss_in_DA.empty=}, {surv_ex_DA.empty=}, {new_da_max<tmp_da_max=}')
+#                 print(loss_in_DA)
+#                 print(surv_ex_DA)
+                if loss_in_DA.empty and surv_ex_DA.empty and new_da_max<tmp_da_max:
+#                     print(f'\n\nBoundary point removed:'); 
+#                     print(f'{idx=}')
+#                     print(tmp_border_max.loc[idx,:])
+#                     print('new_border_max')
+#                     print(new_border_max)
+#                     print('tmp_border_max')
+#                     print(tmp_border_max)
+
+                    tmp_border_max=new_border_max
+                    tmp_fit_max=polar_interpolation(tmp_border_max.angle, tmp_border_max.amplitude, ang_range)
+                    tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude)
+                    continue_smoothing=True
+            tmp_border_max.reset_index(inplace=True, drop=True)
 
             
             print(it)
@@ -1458,7 +1473,7 @@ class DA:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
 
             
-    def plot_da_border(self,ax, at_turn=None, type_plot="polar", color="blue", ls='-', linestyle=None, alpha=1, label="DA"):
+    def plot_da_border(self,ax, at_turn=None, type_plot="polar", c_boundary_min="blue", c_boundary_max="red", ls='-', linestyle=None, alpha=1, label="DA"):
         """
         Plot the DA border.
         
@@ -1477,28 +1492,53 @@ class DA:
     
 #         data = self._da_border_min[at_turn]
 #         angle=np.array(data.angle); amplitude=np.array(data.amplitude)
-        angle=np.array(self._da_border_min[at_turn].angle) 
-        amplitude=np.array(self._da_border_min[at_turn].amplitude)
-        sort = np.argsort(angle)
-        angle= angle[sort]; amplitude = amplitude[sort]
-        if type_plot=="polar":
-            
-            if linestyle is None:
-                ax.plot(angle,amplitude,ls=ls,color=color,alpha=alpha,label=label)
-            else:
-                ax.plot(angle,amplitude,linestyle=linestyle,color=color,alpha=alpha,label=label)
+        if "angle" not in self.survival_data.columns:
+            angle= np.angle(self.survival_data['x']+1j*self.survival_data['y'], deg=True)
+        else:
+            angle= np.array(self.survival_data.angle)
+        ang_range=(min(angle),max(angle))
 
+        fit_min=polar_interpolation(self._da_border_min[at_turn].angle, self._da_border_min[at_turn].amplitude, ang_range)
+        fit_max=polar_interpolation(self._da_border_max[at_turn].angle, self._da_border_max[at_turn].amplitude, ang_range)
+        
+        amplitude_min=fit_min(angle)
+        amplitude_max=fit_max(angle)
+        sort = np.argsort(angle)
+        angle= angle[sort]; amplitude_min = amplitude_min[sort]; amplitude_max = amplitude_max[sort]
+        if type_plot=="polar":
+            if c_boundary_min:
+                if linestyle is None:
+                    ax.plot(angle,amplitude_min,ls=ls,color=c_boundary_min,alpha=alpha,label=label+' (min)')
+                else:
+                    ax.plot(angle,amplitude_min,linestyle=linestyle,color=c_boundary_min,alpha=alpha,label=label+' (min)')
+
+            if c_boundary_max:
+                if linestyle is None:
+                    ax.plot(angle,amplitude_max,ls=ls,color=c_boundary_max,alpha=alpha,label=label+' (max)')
+                else:
+                    ax.plot(angle,amplitude_max,linestyle=linestyle,color=c_boundary_max,alpha=alpha,label=label+' (max)')
+                    
             ax.set_xlabel(r'angle [$^{\circ}$]')
             ax.set_ylabel(r'amplitude [$\sigma$]')
                 
         elif type_plot=="cartesian":
-            x= amplitude*np.cos(angle*np.pi/180)
-            y= amplitude*np.sin(angle*np.pi/180)
-            
-            if linestyle is None:
-                ax.plot(x,y,ls=ls,color=color,alpha=alpha,label=label)
-            else:
-                ax.plot(x,y,linestyle=linestyle,color=color,alpha=alpha,label=label)
+            if c_boundary_min:
+                x= amplitude_min*np.cos(angle*np.pi/180)
+                y= amplitude_min*np.sin(angle*np.pi/180)
+
+                if linestyle is None:
+                    ax.plot(x,y,ls=ls,color=c_boundary_min,alpha=alpha,label=label+' (min)')
+                else:
+                    ax.plot(x,y,linestyle=linestyle,color=c_boundary_min,alpha=alpha,label=label+' (min)')
+                    
+            if c_boundary_max:
+                x= amplitude_max*np.cos(angle*np.pi/180)
+                y= amplitude_max*np.sin(angle*np.pi/180)
+
+                if linestyle is None:
+                    ax.plot(x,y,ls=ls,color=c_boundary_max,alpha=alpha,label=label+' (max)')
+                else:
+                    ax.plot(x,y,linestyle=linestyle,color=c_boundary_max,alpha=alpha,label=label+' (max)')
                 
             ax.set_xlabel(r'angle [$^{\circ}$]')
             ax.set_ylabel(r'amplitude [$\sigma$]')
