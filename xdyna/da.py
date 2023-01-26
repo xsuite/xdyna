@@ -936,7 +936,7 @@ class DA:
 
 
     # Not allowed on parallel process
-    def calculate_da(self,at_turn=None,angular_precision=1,smoothing=False):
+    def calculate_da(self,at_turn=None,angular_precision=1,smoothing=True):
         data=self.survival_data.copy()
         
         if at_turn is None:
@@ -1087,6 +1087,7 @@ class DA:
             tmp_da_min =compute_da(tmp_border_min.angle, tmp_border_min.amplitude)
             tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude)
             
+            
             print('''
             # Check if some min DA border particles could be removed without having losses 
             # inside.
@@ -1127,8 +1128,6 @@ class DA:
             # without having losses inside.
             ''')
             cand=surv.loc[surv.amplitude>tmp_fit_min(surv.angle),:]
-#             print('\n\nCheck if surviving particles outside min DA border:')
-#             print(cand)
             for idx, c in cand.iterrows():
                 new_border_min=pd.DataFrame({'angle':np.append(tmp_border_min.angle,[c.angle]),
                                 'amplitude':np.append(tmp_border_min.amplitude,[c.amplitude])})
@@ -1137,17 +1136,14 @@ class DA:
                 
                 loss_in_DA = loss.loc[loss.amplitude<=new_fit_min(loss.angle),:]
                 if loss_in_DA.empty:
-#                     print(f'\n\nNew boundary point:'); print(c); print(tmp_border_min)
-                    
                     tmp_border_min=new_border_min
                     tmp_fit_min=polar_interpolation(tmp_border_min.angle, tmp_border_min.amplitude, ang_range)
                     continue_smoothing=True
-                    
-#                     print(tmp_border_min)
             
             
 #             print('''
-#             # Check if max DA border cross min DA border, then add particles
+#             # Check if max DA border cross min DA border, then add point from max DA border or
+#             # remove them from max DA border
 #             ''')
             
             
