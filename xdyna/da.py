@@ -266,7 +266,6 @@ class DA:
     def line_file(self, file):
         self.meta.line_file = file
 
-
     def load_line_from_file(self, file=None):
         if file is not None and self.line_file is not None and self.line_file != -1 and file != self.line_file:
             raise ValueError("Trying to load different line than the one specified in the metafile! " + \
@@ -281,21 +280,17 @@ class DA:
                 return
             else:
                 file = self.line_file
-
         with ProtectFile(file, 'r') as pf:
             line = json.load(pf)
 
+        # Fix string keys in JSON: seeds are int
         if self.meta.nseeds > 0:
             if len(line.keys()) > self.meta.nseeds:
                 raise ValueError("Line file not compatible with seeds! Expected a dict of lines with seeds as keys.")
-            self._line = {}
-            for seed, l in line.items():
-                if type(l) != dict:
-                    print(f"Warning: Seed {seed}: {l}")
-                else:
-                    self._line[int(seed)] = xt.Line.from_dict(l)
+            line = {int(seed): xt.Line.from_dict(l) for seed, l in line.items()}
         else:
-            self._line = xt.Line.from_dict(line)
+            line = xt.Line.from_dict(line)
+        self._line = line
         self.line_file = file
 
 
@@ -433,8 +428,8 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=None,
+                                ang_max=None, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
         """
 
@@ -442,19 +437,18 @@ class DA:
 
         # Make the data
         rng = default_rng()
+        ang_min = 0 if ang_min is None else ang_min
+        ang_max = 90 if ang_max is None else ang_max
         if self.meta.nseeds > 0:
             r = rng.uniform(low=0, high=r_max**2, size=num_part*self.meta.nseeds)
-            r = np.sqrt(r)
-            th = rng.uniform(low=0, high=2*np.pi, size=num_part*self.meta.nseeds)
-            x = r*np.cos(th)
-            y = r*np.sin(th)
+            th = rng.uniform(low=ang_min, high=ang_max*np.pi/180, size=num_part*self.meta.nseeds)
             seeds = np.repeat(np.arange(1,self.meta.nseeds+1), num_part)
         else:
             r = rng.uniform(low=0, high=r_max**2, size=num_part)
-            r = np.sqrt(r)
-            th = rng.uniform(low=0, high=2*np.pi, size=num_part)
-            x = r*np.cos(th)
-            y = r*np.sin(th)
+            th = rng.uniform(low=ang_min, high=ang_max*np.pi/180, size=num_part)
+        r = np.sqrt(r)
+        x = r*np.cos(th)
+        y = r*np.sin(th)
 
         # Make dataframe
         self._surv = pd.DataFrame()
