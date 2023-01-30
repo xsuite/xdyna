@@ -266,6 +266,7 @@ class DA:
     def line_file(self, file):
         self.meta.line_file = file
 
+
     def load_line_from_file(self, file=None):
         if file is not None and self.line_file is not None and self.line_file != -1 and file != self.line_file:
             raise ValueError("Trying to load different line than the one specified in the metafile! " + \
@@ -280,15 +281,21 @@ class DA:
                 return
             else:
                 file = self.line_file
+
         with ProtectFile(file, 'r') as pf:
             line = json.load(pf)
 
-        # Fix string keys in JSON: seeds are int
         if self.meta.nseeds > 0:
             if len(line.keys()) > self.meta.nseeds:
                 raise ValueError("Line file not compatible with seeds! Expected a dict of lines with seeds as keys.")
-            line = {int(seed): l for seed, l in line.items()}
-        self._line = line
+            self._line = {}
+            for seed, l in line.items():
+                if type(l) != dict:
+                    print(f"Warning: Seed {seed}: {l}")
+                else:
+                    self._line[int(seed)] = xt.Line.from_dict(l)
+        else:
+            self._line = xt.Line.from_dict(line)
         self.line_file = file
 
 
