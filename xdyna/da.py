@@ -1092,10 +1092,10 @@ class DA:
             tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude)
                 
             
-            print('''
+            #print('''
             # Check if surviving particles outside min DA border can be added to the border 
             # without having losses inside.
-            ''')
+            #''')
             cand=surv.loc[surv.amplitude>tmp_fit_min(surv.angle),:]
             for idx, c in cand.iterrows():
                 new_border_min=pd.DataFrame({'angle':np.append(tmp_border_min.angle,[c.angle]),
@@ -1113,7 +1113,7 @@ class DA:
                     # Else we must check if adding at least one point to max DA boundary
                     # allow it to not cross anymore max DA boundary
                     else:
-                        print(f'candidate:\n{c}')
+                        #print(f'candidate:\n{c}')
                         loss_strict=loss.loc[loss.amplitude>c.amplitude,:]
                         
                         #loss_range=(np.max(tmp_border_max.angle[tmp_border_max.angle<c.angle]),
@@ -1127,14 +1127,14 @@ class DA:
                         loss_index=np.array(loss_strict.index[np.argsort(loss_strict['dist'])])
                         
                         #print(loss_range)
-                        print(loss_strict.index)
-                        print(loss_index)
+                        #print(loss_strict.index)
+                        #print(loss_index)
                         
                         
                         iloss=0
                         while iloss<5 and c.amplitude>tmp_fit_max(c.angle):
                             l=loss_strict.loc[loss_index[iloss],:]
-                            print(f'l: {iloss}\n{l}')
+                            #print(f'l: {iloss}\n{l}')
                             
                             new_border_max=pd.DataFrame({'angle':np.append(tmp_border_max.angle,[l.angle]),
                                 'amplitude':np.append(tmp_border_max.amplitude,[l.amplitude])})
@@ -1143,7 +1143,7 @@ class DA:
                             
                             loss_in_DA_max = loss_strict.loc[loss_strict.amplitude<new_fit_max(loss_strict.angle),:]
                             if not loss_in_DA_max.empty:
-                                print(True)
+                                #print(True)
                                 if len(loss_in_DA_max)==1:
                                     new_border_max=pd.DataFrame({'angle':np.append(new_border_max['angle'],
                                                                                    [loss_in_DA_max.angle]),
@@ -1166,10 +1166,10 @@ class DA:
                             iloss+=1
             
             
-            print('''
+            #print('''
             # Check if some min DA border particles could be removed without having losses 
             # inside.
-            ''')
+            #''')
             surv_in_da=surv.loc[surv.amplitude<=tmp_fit_min(surv.angle),:]
             index=tmp_border_min.index[np.argsort(tmp_border_min.amplitude)]
             for idx in index:
@@ -1207,9 +1207,9 @@ class DA:
 #             ''')
             
             
-            print('''
+            #print('''
             # Check if some max DA border particles could be removed without cross min DA border
-            ''')
+            #''')
             surv_in_da=surv.loc[surv.amplitude<=tmp_fit_min(surv.angle),:]
 #             for idx, c in tmp_border_max.loc[np.flip(np.argsort(tmp_border_max.amplitude))].iterrows():
             index=tmp_border_max.index[np.flip(np.argsort(tmp_border_max.amplitude))]
@@ -1244,7 +1244,7 @@ class DA:
             tmp_border_max.reset_index(inplace=True, drop=True)
 
             
-            print(it)
+            #print(it)
             it+=1
             
             
