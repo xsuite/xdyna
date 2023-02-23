@@ -1017,51 +1017,51 @@ class DA:
             losses =data.nturns<at_turn
             loss=data.loc[ losses,:]
             surv=data.loc[~losses,:]
-            
-#             loss_in_DA_min = loss.loc[loss.amplitude<=border_min_fit(section_loss.angle),:]
-#             loss_in_DA_max = loss_in_DA_max.loc[min(loss_in_DA_max.index),:]
-#             if not loss_in_DA_min.empty or not loss_in_DA_max.empty:
 
             # Check if losses lower than max DA boundary, add those to max DA boundary
             border_max_fit=polar_interpolation(border_max.angle, border_max.amplitude, angle_range=ang_range)
-#             border_max=loss.loc[loss.amplitude<=border_max_fit(loss.angle),['id','angle','amplitude']]
             loss_in_DA_max = loss.loc[loss.amplitude< border_max_fit(loss.angle),:]
             if not loss_in_DA_max.empty:
-                if len(loss_in_DA_max)==1:
-                    border_max=pd.DataFrame({'angle':np.append(border_max['angle'],[loss_in_DA_max.angle]),
-                                             'amplitude':np.append(border_max['amplitude'],[loss_in_DA_max.amplitude])})
-                elif len(loss_in_DA_max)>1:
-                    border_max=pd.DataFrame({'angle':np.append(border_max['angle'],    [loss_in_DA_max.angle]),
-                                             'amplitude':np.append(border_max['amplitude'],[loss_in_DA_max.amplitude])})
+                border_max=pd.concat([border_max,loss_in_DA_max])
+#                 if len(loss_in_DA_max)==1:
+#                     border_max=pd.DataFrame({'id':np.append(border_max['id'],[loss_in_DA_max.id]),
+#                                              'angle':np.append(border_max['angle'],[loss_in_DA_max.angle]),
+#                                              'amplitude':np.append(border_max['amplitude'],[loss_in_DA_max.amplitude])})
+#                 elif len(loss_in_DA_max)>1:
+#                     border_max=pd.DataFrame({'id':np.append(border_max['id'],    [loss_in_DA_max.id]),
+#                                              'angle':np.append(border_max['angle'],    [loss_in_DA_max.angle]),
+#                                              'amplitude':np.append(border_max['amplitude'],[loss_in_DA_max.amplitude])})
 
             # Check if min DA boundary cross max DA boundary, remove problematic dot from min DA boundary
             border_max_fit=polar_interpolation(border_max.angle, border_max.amplitude, angle_range=ang_range)
             border_min=border_min.loc[border_min.amplitude<border_max_fit(border_min.angle),:]
                 
-            # Check if losses lower than min DA boundary [TO BE TESTED]
-#             border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=ang_range)
-#             loss_in_DA_min = loss.loc[loss.amplitude<=border_min_fit(loss.angle),:]
-#             surv_in_da=surv.loc[surv.amplitude<=border_min_fit(surv.angle),:]
-#             for idx, loss_row in loss_in_DA_min.iterrows():
-
-#                 surv_amp_diff = np.abs((surv_in_da.x-loss_row.x) + 1j*(surv_in_da.y-loss_row.y))
-#                 idx_surv = surv_in_da.index.tolist()[np.argsort(surv_amp_diff)]
-
-#                 border_min_fit_tmp=border_min_fit
-#                 border_min_tmp ={'angle':[],'amplitude':[]}
-#                 it = 0;
-#                 while it < len(sorted_idx_surv) and loss_row.amplitude<=border_min_fit_tmp(loss_row.angle):
-#                     candidate=surv_in_da.loc[idx_surv[it],:]
-#                     border_min_tmp['angle']    =np.append(border_min['angle'],    [candidate.angle])
-#                     border_min_tmp['amplitude']=np.append(border_min['amplitude'],[candidate.amplitude])
-#                     border_min_fit_tmp=polar_interpolation(border_min_tmp.angle, border_min_tmp.amplitude, angle_range=ang_range)
-
-#                     it+=1
-
-#                 if row.amplitude>border_min_fit_tmp(row.angle):
-#                     border_min=border_min_tmp
-#                     border_min_fit=border_min_fit_tmp
-
+            # Check if losses lower than min DA boundary
+            border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=ang_range)
+            pb_border_max=border_max.loc[border_max.amplitude<=border_min_fit(border_max.angle),:]
+            while not pb_border_max.empty:
+                for idx,ploss in pb_border_max.iterrows():
+                    border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=ang_range)
+                    if ploss.amplitude <= border_min_fit(ploss.angle):
+                        lower=border_min.loc[border_min.angle==max(border_min.angle[border_min.angle<ploss.angle]),:]
+                        upper=border_min.loc[border_min.angle==min(border_min.angle[border_min.angle>ploss.angle]),:]
+                        lower_amp=lower.amplitude.tolist()[0] ; lower_ang=lower.angle.tolist()[0]
+                        upper_amp=upper.amplitude.tolist()[0] ; upper_ang=upper.angle.tolist()[0]
+                        # Remove min border point too high for the losses
+                        if lower_amp < upper_amp:
+                            border_min.drop(index=upper.index.values, inplace=True)
+                            upper=border_min.loc[border_min.angle==min(border_min.angle[border_min.angle>ploss.angle]),:]
+                            upper_amp=upper.amplitude.tolist()[0] ; upper_ang=upper.angle.tolist()[0]
+                        else:
+                            border_min.drop(index=lower_amp, inplace=True)
+                            lower=border_min.loc[border_min.angle==max(border_min.angle[border_min.angle<ploss.angle]),:]
+                            lower_amp=lower.amplitude.tolist()[0] ; lower_ang=lower.angle.tolist()[0]
+                        # Add surv particle to min border point near the previous part was removed
+                        candidate=surv.loc[(surv.angle<upper_ang) & (surv.angle>lower_ang) & (surv.amplitude<ploss.amplitude),['id','angle','amplitude']]
+                        border_min=pd.concat([ border_min,candidate.loc[[candidate.idxmax()["amplitude"]],:]])
+                        
+                border_min_fit=polar_interpolation(border_min.angle, border_min.amplitude, angle_range=ang_range)
+                pb_border_max=border_max.loc[border_max.amplitude<=border_min_fit(border_max.angle),:]
 
             # Smooth DA
             if smoothing:
@@ -1177,14 +1177,11 @@ class DA:
 #             ''')
             cand=surv.loc[surv.amplitude>tmp_fit_min(surv.angle),:]
             for idx, c in cand.iterrows():
-#                 print(tmp_border_min)
-#                 print(c)
-#                 print(c.loc[['id','angle','amplitude']])
-#                 new_border_min=pd.concat([ tmp_border_min,c.loc[['id','angle','amplitude']] ])
-                new_border_min=pd.DataFrame({'id':np.append(tmp_border_min.id,[c.id]),
-                                             'angle':np.append(tmp_border_min.angle,[c.angle]),
-                                             'amplitude':np.append(tmp_border_min.amplitude,[c.amplitude])})
-                new_border_min.set_index('id',drop=False,inplace=True)
+                new_border_min=pd.concat([ tmp_border_min,cand.loc[[idx],['id','angle','amplitude']] ])
+#                 new_border_min=pd.DataFrame({'id':np.append(tmp_border_min.id,[c.id]),
+#                                              'angle':np.append(tmp_border_min.angle,[c.angle]),
+#                                              'amplitude':np.append(tmp_border_min.amplitude,[c.amplitude])})
+#                 new_border_min.set_index('id',drop=False,inplace=True)
     
                 # Remove angle duplicate
                 angs,nmb=np.unique(new_border_min.angle,return_counts=True)
@@ -1218,12 +1215,13 @@ class DA:
                         
                         iloss=0
                         while iloss<5 and c.amplitude>tmp_fit_max(c.angle):
-                            l=loss_strict.loc[loss_index[iloss],:]
-#                             new_border_max=pd.concat([ tmp_border_max, l.loc[['id','angle','amplitude']] ])
-                            new_border_max=pd.DataFrame({'id':np.append(tmp_border_max.id,[l.id]),
-                                                         'angle':np.append(tmp_border_max.angle,[l.angle]),
-                                                         'amplitude':np.append(tmp_border_max.amplitude,[l.amplitude])})
-                            new_border_max.set_index('id',drop=False,inplace=True)
+                            idx=loss_index[iloss]
+                            new_border_max=pd.concat([ tmp_border_max, loss_strict.loc[[idx],['id','angle','amplitude']] ])
+#                             l=loss_strict.loc[idx,:]
+#                             new_border_max=pd.DataFrame({'id':np.append(tmp_border_max.id,[l.id]),
+#                                                          'angle':np.append(tmp_border_max.angle,[l.angle]),
+#                                                          'amplitude':np.append(tmp_border_max.amplitude,[l.amplitude])})
+#                             new_border_max.set_index('id',drop=False,inplace=True)
                             
                             new_fit_max=polar_interpolation(new_border_max.angle, new_border_max.amplitude, ang_range)
                             
@@ -1309,7 +1307,6 @@ class DA:
         ang_range=(min(data.angle),max(data.angle))
         
         # Get list of turn to 
-#         if nsteps is None:
         lturns=np.sort(np.unique(self.survival_data.nturns))
         lturns=lturns[(lturns>from_turn) & (lturns<to_turn)]
         lturns=np.unique(np.append(lturns,[from_turn,to_turn]))
@@ -1319,89 +1316,86 @@ class DA:
         border_min=self._da_border_min[to_turn][0]
         da=self._davsturns[to_turn][0]
         removed=pd.DataFrame(columns=data.columns)
-        #border_max=self._da_border_max[to_turn]
-        for at_turn in reversed(lturns):
-#                 print(at_turn)
-                # Initiallise loop
-                raw_border_min=border_min
-#                 raw_border_max=border_max
-                
-                # Regenerate the max da border and detect min da limit
-                losses=data.nturns<at_turn
-                loss=data.loc[ losses,:]; min_loss=min(loss.amplitude)
-                surv=data.loc[~losses,:]; max_surv=max(surv.amplitude)
-#                 min_amplitude = min([min_loss,max_surv])-2
-                max_amplitude = max([min_loss,max_surv])+2
-                raw_border_max=loss.loc[loss.amplitude<=max_amplitude,['id','angle','amplitude']]
-            
-                # Check if DA border cross each others
-                fit_max=polar_interpolation(raw_border_max.angle, raw_border_max.amplitude, ang_range)
-                check_boundary_cross=raw_border_min.loc[raw_border_min.amplitude>=fit_max(raw_border_min.angle)]
-                
-                # Recheck previous turns
-                if not check_boundary_cross.empty and self.da_type in ['monte_carlo', 'free']:
-                    removed=pd.concat([ removed, data.loc[check_boundary_cross.id,:] ])
-                    recheck=np.sort(np.unique(self.survival_data.nturns))
-                    recheck=recheck[recheck>at_turn]
-                    new_DA_lim_min=0; da=0
-                    for rc in reversed(recheck):
-                        surv_rc=data.loc[data.nturns>=rc,:]
-                        raw_border_min=self._da_border_min[rc][0]
-                        raw_border_max=self._da_border_max[rc][0]
-                        raw_border_min=raw_border_min.loc[raw_border_min.amplitude<fit_max(raw_border_min.angle),:]
-                
-                        # TODO: Local WARMUP
-                        
-                        new_border_min,new_border_max=self._da_smoothing(raw_border_min,raw_border_max,removed=removed,
-                                                                 at_turn=rc,DA_lim_min=new_DA_lim_min, active_warmup=False)
-#                         new_fit_min=polar_interpolation(new_border_min.angle, new_border_min.amplitude, ang_range)
-#                         new_fit_max=polar_interpolation(new_border_max.angle, new_border_max.amplitude, ang_range)
-                        
-#                         new_border_min=surv_rc.loc[(surv_rc.amplitude>=new_fit_min(surv_rc.angle)) & 
-#                                                    (surv_rc.amplitude< new_fit_max(surv_rc.angle)) & 
-#                                                    (surv_rc.amplitude< fit_max(surv_rc.angle)) ,['id','angle','amplitude']]
-                        
-                        new_da=compute_da(new_border_min.angle,new_border_min.amplitude)
-                        new_DA_lim_min=min(new_border_min.amplitude)
-            
-#                         print(f'{at_turn=} - {rc=} : {new_da=}')
-                        # Check if DA decrease with the turns
-                        if new_da>=da:
-                            da=new_da
-                            border_min=new_border_min;
-            
-                        # Save DA
-                        self._da_border_min[rc][0]=border_min;
-                        self._da_border_max[rc][0]=new_border_max;
+        if self.da_type not in ['monte_carlo', 'free']:
+            for at_turn in reversed(lturns):
+                self.calculate_da(at_turn=at_turn,angular_precision=1,smoothing=False)
+        else:
+            for at_turn in reversed(lturns):
+    #                 print(at_turn)
+                    # Initiallise loop
+                    raw_border_min=border_min
+    #                 raw_border_max=border_max
 
-                        self._davsturns[rc][0]    =da
-                        self._davsturns_min[rc][0]=new_DA_lim_min=min(new_border_min.amplitude)
-                        self._davsturns_max[rc][0]=max(new_border_min.amplitude)
-                        
-                    raw_border_min=new_border_min
+                    # Regenerate the max da border and detect min da limit
+                    losses=data.nturns<at_turn
+                    loss=data.loc[ losses,:]; min_loss=min(loss.amplitude)
+                    surv=data.loc[~losses,:]; max_surv=max(surv.amplitude)
+                    max_amplitude = max([min_loss,max_surv])+2
                     raw_border_max=loss.loc[loss.amplitude<=max_amplitude,['id','angle','amplitude']]
-                    
-        
-                # Add new surviving particles to min da border and smooth da borders
-                DA_lim_min=min(raw_border_min.amplitude)
-                new_border_min,new_border_max=self._da_smoothing(raw_border_min,raw_border_max,removed=removed,
-                                                                 at_turn=at_turn,DA_lim_min=DA_lim_min,active_warmup=True)
-                new_da=compute_da(new_border_min.angle, new_border_min.amplitude)
-                
-                # Check if DA decrease with the turns
-                if new_da>=da:
-                    da=new_da
-                    border_min=new_border_min
-                border_max=new_border_max
-                    
-        
-                # Save DA
-                self._da_border_min[at_turn]=[ border_min ]; #.loc[:,['id','angle','amplitude']] ];
-                self._da_border_max[at_turn]=[ border_max ]; #.loc[:,['id','angle','amplitude']] ];
 
-                self._davsturns[at_turn]    =[ da ]
-                self._davsturns_min[at_turn]=[ min(border_min.amplitude) ]
-                self._davsturns_max[at_turn]=[ max(border_min.amplitude) ]
+                    # Check if DA border cross each others
+                    fit_max=polar_interpolation(raw_border_max.angle, raw_border_max.amplitude, ang_range)
+                    check_boundary_cross=raw_border_min.loc[raw_border_min.amplitude>=fit_max(raw_border_min.angle)]
+
+                    # Recheck previous turns
+                    if not check_boundary_cross.empty and self.da_type in ['monte_carlo', 'free']:
+                        removed=pd.concat([ removed, data.loc[check_boundary_cross.id,:] ])
+                        recheck=np.sort(np.unique(self.survival_data.nturns))
+                        recheck=recheck[recheck>at_turn]
+                        new_DA_lim_min=0; da=0
+                        for rc in reversed(recheck):
+                            print(f'{at_turn=} / {rc=}')
+                            surv_rc=data.loc[data.nturns>=rc,:]
+                            raw_border_min=self._da_border_min[rc][0]
+                            raw_border_max=self._da_border_max[rc][0]
+                            raw_border_min=raw_border_min.loc[raw_border_min.amplitude<fit_max(raw_border_min.angle),:]
+
+                            # TODO: Local WARMUP
+
+                            new_border_min,new_border_max=self._da_smoothing(raw_border_min,raw_border_max,removed=removed,
+                                                                     at_turn=rc,DA_lim_min=new_DA_lim_min, active_warmup=False)
+
+                            new_da=compute_da(new_border_min.angle,new_border_min.amplitude)
+                            new_DA_lim_min=min(new_border_min.amplitude)
+
+    #                         print(f'{at_turn=} - {rc=} : {new_da=}')
+                            # Check if DA decrease with the turns
+                            if new_da>=da:
+                                da=new_da
+                                border_min=new_border_min;
+
+                            # Save DA
+                            self._da_border_min[rc][0]=border_min;
+                            self._da_border_max[rc][0]=new_border_max;
+
+                            self._davsturns[rc][0]    =da
+                            self._davsturns_min[rc][0]=new_DA_lim_min=min(new_border_min.amplitude)
+                            self._davsturns_max[rc][0]=max(new_border_min.amplitude)
+
+                        raw_border_min=new_border_min
+                        raw_border_max=loss.loc[loss.amplitude<=max_amplitude,['id','angle','amplitude']]
+
+
+                    # Add new surviving particles to min da border and smooth da borders
+                    DA_lim_min=min(raw_border_min.amplitude)
+                    new_border_min,new_border_max=self._da_smoothing(raw_border_min,raw_border_max,removed=removed,
+                                                                     at_turn=at_turn,DA_lim_min=DA_lim_min,active_warmup=True)
+                    new_da=compute_da(new_border_min.angle, new_border_min.amplitude)
+
+                    # Check if DA decrease with the turns
+                    if new_da>=da:
+                        da=new_da
+                        border_min=new_border_min
+                    border_max=new_border_max
+
+
+                    # Save DA
+                    self._da_border_min[at_turn]=[ border_min ]; #.loc[:,['id','angle','amplitude']] ];
+                    self._da_border_max[at_turn]=[ border_max ]; #.loc[:,['id','angle','amplitude']] ];
+
+                    self._davsturns[at_turn]    =[ da ]
+                    self._davsturns_min[at_turn]=[ min(border_min.amplitude) ]
+                    self._davsturns_max[at_turn]=[ max(border_min.amplitude) ]
                 
                 
     # =================================================================
