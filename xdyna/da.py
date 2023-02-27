@@ -389,15 +389,13 @@ class DA:
 
         # Make all combinations
         if self.meta.nseeds > 0:
-            self.meta.nseeds = nseeds
-            seeds = np.arange(1,nseeds+1)
+            seeds = np.arange(1, self.meta.nseeds+1)
             x, px, y, py, zeta, delta, seeds = np.array(np.meshgrid(x, px, y, py, zeta, delta, seeds)).reshape(7,-1)
 
         # Make dataframe
         self._surv = pd.DataFrame()
         if self.meta.nseeds > 0:
             self._surv['seed'] = seeds.astype(int)
-
         self._surv['nturns'] = -1
         self._surv['x_norm_in'] = x
         self._surv['y_norm_in'] = y
@@ -426,8 +424,7 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_initial_grid(self, *,
-                                x_min, x_max, x_step=None, x_num=None,
+    def generate_initial_grid(self, *, x_min, x_max, x_step=None, x_num=None,
                                 y_min, y_max, y_step=None, y_num=None,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
@@ -455,8 +452,7 @@ class DA:
 
         # Make all combinations
         if self.meta.nseeds > 0:
-            self.meta.nseeds = nseeds
-            seeds = np.arange(1,nseeds+1)
+            seeds = np.arange(1, self.meta.nseeds+1)
             x, y, seeds = np.array(np.meshgrid(x_space, y_space, seeds)).reshape(3,-1)
         else:
             x, y = np.array(np.meshgrid(x_space, y_space)).reshape(2,-1)
@@ -523,8 +519,7 @@ class DA:
             ang = np.linspace(ang_min, ang_max, angles )
         # Make all combinations
         if self.meta.nseeds > 0:
-            self.meta.nseeds = nseeds
-            seeds = np.arange(1,nseeds+1)
+            seeds = np.arange(1,self.meta.nseeds+1)
             ang, seeds, r = np.array(np.meshgrid(ang, seeds, r)).reshape(3,-1)
         else:
             r, ang = np.array(np.meshgrid(r, ang)).reshape(2,-1)
