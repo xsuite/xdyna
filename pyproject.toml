@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "xdyna"
-version = "0.0.3"
+version = "0.1.0"
 description = "Xsuite dynamics package"
 homepage = "https://github.com/xsuite/xdyna"
 repository = "https://github.com/xsuite/xdyna"
@@ -14,9 +14,14 @@ python = ">=3.8"
 scipy = ">=1.9.3"
 pandas = ">=1.5.1"
 
-
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
+
+[tool.poetry.group.gh_actions]
+optional = true
+
+[tool.poetry.group.gh_actions.dependencies]
+xsuite = ">=0.4.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.8"]  # Needed for pip install -e

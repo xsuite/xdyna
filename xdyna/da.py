@@ -105,6 +105,7 @@ class DA:
             self.read_surv()
         if self._surv is None:  # also nothing on file
             return None
+        
         if self.da_type == 'radial':
             if self.da_dimension == 2:
                 view_cols = ['ang_xy', 'r_xy']
@@ -116,7 +117,7 @@ class DA:
                 view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'delta_in']
             elif self.da_dimension == 6:
                 view_cols = ['ang_xy', 'ang_xpx', 'ang_ypy', 'r_xpxypy', 'zeta_in', 'delta_in']
-        else:
+        elif self.da_type == 'grid':
             if self.da_dimension == 2:
                 view_cols = ['x_norm_in', 'y_norm_in']
             elif self.da_dimension == 3:
@@ -127,10 +128,14 @@ class DA:
                 view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'delta_in']
             elif self.da_dimension == 6:
                 view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
+        else:
+            view_cols = ['x_norm_in', 'px_norm_in', 'y_norm_in', 'py_norm_in', 'zeta_in', 'delta_in']
+        
         if self.meta.nseeds > 0:
             view_cols += ['seed']
+        
         if self.meta.pairs_shift == 0:
-            view_cols += ['nturns']
+            view_cols += ['nturns', 'state']
             df = self._surv[view_cols]
         else:
             orig = self._surv['paired_to'] == self._surv.index
@@ -138,10 +143,19 @@ class DA:
             # Change to np.array to ignore index
             df['nturns1'] = np.array(self._surv.loc[orig,'nturns'])
             df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
+            df['state1'] = np.array(self._surv.loc[orig,'state'])
+            df['state2'] = np.array(self._surv.loc[~orig,'state'])
+        
         return df.rename(columns = {
                     'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
                     'ang_xy':'angle', 'ang_xpx':'angle_x', 'ang_ypy':'angle_y', 'r_xy':'amplitude', 'r_xpxypy': 'amplitude' \
                 }, inplace=False)
+
+
+    def to_pandas(self, full: bool=False) -> pd.DataFrame:
+        if full:
+            return self._surv
+        return self.survival_data
 
     @property
     def meta(self):
@@ -368,6 +382,125 @@ class DA:
             self._surv = pd.concat([self._surv, df])
 
 
+    def set_coordinates(self, *,
+                        x=None, px=None, y=None, py=None, zeta=None, delta=None,
+                        normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """
+        Let user provide initial coordinates for each plane.
+        """
+
+        self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
+
+        user_provided_coords = [i for i in [x,px, y, py, zeta, delta] if i is not None]
+
+        # check that all provided lists have the same length
+        assert len({len(i) for i in user_provided_coords}) == 1, 'Mismatch in length of provided lists'
+
+        # replace all unused variables with zero
+        x, px, y, py, zeta, delta = [ i if i is not None else 0 for i in [x,px, y, py, zeta, delta]]
+
+        # Make all combinations
+        if self.meta.nseeds > 0:
+            seeds = np.arange(1, self.meta.nseeds+1)
+            x, px, y, py, zeta, delta, seeds = np.array(np.meshgrid(x, px, y, py, zeta, delta, seeds)).reshape(7,-1)
+
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        self._surv['nturns'] = -1
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['px_norm_in'] = px
+        self._surv['py_norm_in'] = py
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
+        self.write_surv()
+        self.meta.da_type = 'free'
+        self.meta.da_dim = len(user_provided_coords)
+        # self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
+        self.meta.npart = len(self._surv.index)
+        self.meta._store()
+
+
+
+    # Not allowed on parallel process
+    def generate_initial_grid(self, *, x_min, x_max, x_step=None, x_num=None,
+                                y_min, y_max, y_step=None, y_num=None,
+                                px_norm=0, py_norm=0, zeta=0, delta=0.00027,
+                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+        """Generate the initial conditions in a 2D X-Y grid.
+        """
+
+        self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
+
+        # Make the grid in xy
+        def check_options(coord_min, coord_max, coord_step, coord_num, plane):
+            if coord_step is None and coord_num is None:
+                raise ValueError(f"Specify at least '{plane}_step' or '{plane}_num'.")
+            elif coord_step is not None and coord_num is not None:
+                raise ValueError(f"Use only one of '{plane}_step' and '{plane}_num', not both.")
+            elif coord_step is not None:
+                coord_num = floor( (coord_max-coord_min) / coord_step ) + 1
+                coord_max = coord_min + (coord_num-1) * coord_step
+            return coord_min, coord_max, coord_num
+
+        x_min, x_max, x_num = check_options(x_min, x_max, x_step, x_num, 'x')
+        y_min, y_max, y_num = check_options(y_min, y_max, y_step, y_num, 'y')
+
+        x_space = np.linspace(x_min, x_max, x_num)
+        y_space = np.linspace(y_min, y_max, y_num)
+
+        # Make all combinations
+        if self.meta.nseeds > 0:
+            seeds = np.arange(1, self.meta.nseeds+1)
+            x, y, seeds = np.array(np.meshgrid(x_space, y_space, seeds)).reshape(3,-1)
+        else:
+            x, y = np.array(np.meshgrid(x_space, y_space)).reshape(2,-1)
+
+        # Make dataframe
+        self._surv = pd.DataFrame()
+        if self.meta.nseeds > 0:
+            self._surv['seed'] = seeds.astype(int)
+        self._surv['ang_xy'] = np.arctan2(y,x)*180/np.pi
+        self._surv['r_xy'] = np.sqrt(x**2 + y**2)
+        self._surv['nturns'] = -1
+        self._surv['x_norm_in'] = x
+        self._surv['y_norm_in'] = y
+        self._surv['px_norm_in'] = px_norm
+        self._surv['py_norm_in'] = py_norm
+        self._surv['zeta_in'] = zeta
+        self._surv['delta_in'] = delta
+        self._surv['x_out'] = -1
+        self._surv['y_out'] = -1
+        self._surv['px_out'] = -1
+        self._surv['py_out'] = -1
+        self._surv['zeta_out'] = -1
+        self._surv['delta_out'] = -1
+        self._surv['s_out'] = -1
+        self._surv['state'] = 1
+        self._surv['submitted'] = False
+        self._surv['finished'] = False
+        self._create_pairs()
+        self.write_surv()
+        self.meta.da_type = 'grid'
+        self.meta.da_dim = 2
+        self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
+        self.meta.npart = len(self._surv.index)
+        self.meta._store()
+
+
 
     # Not allowed on parallel process
     def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
@@ -380,9 +513,9 @@ class DA:
 
         # Make the grid in r
         if r_step is None and r_num is None:
-            raise ValueError(f"Specify at least 'r_step' or 'r_num'.")
+            raise ValueError("Specify at least 'r_step' or 'r_num'.")
         elif r_step is not None and r_num is not None:
-            raise ValueError(f"Use only one of 'r_step' and 'r_num', not both.")
+            raise ValueError("Use only one of 'r_step' and 'r_num', not both.")
         elif r_step is not None:
             r_num = floor( (r_max-r_min) / r_step ) + 1
             r_max = r_min + (r_num-1) * r_step
@@ -398,8 +531,7 @@ class DA:
             ang = np.linspace(ang_min, ang_max, angles )
         # Make all combinations
         if self.meta.nseeds > 0:
-            self.meta.nseeds = nseeds
-            seeds = np.arange(1,nseeds+1)
+            seeds = np.arange(1,self.meta.nseeds+1)
             ang, seeds, r = np.array(np.meshgrid(ang, seeds, r)).reshape(3,-1)
         else:
             r, ang = np.array(np.meshgrid(r, ang)).reshape(2,-1)
@@ -440,8 +572,8 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=None,
+                                ang_max=None, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
         """
 
@@ -449,19 +581,18 @@ class DA:
 
         # Make the data
         rng = default_rng()
+        ang_min = 0 if ang_min is None else ang_min
+        ang_max = 90 if ang_max is None else ang_max
         if self.meta.nseeds > 0:
             r = rng.uniform(low=0, high=r_max**2, size=num_part*self.meta.nseeds)
-            r = np.sqrt(r)
-            th = rng.uniform(low=0, high=2*np.pi, size=num_part*self.meta.nseeds)
-            x = r*np.cos(th)
-            y = r*np.sin(th)
+            th = rng.uniform(low=ang_min, high=ang_max*np.pi/180, size=num_part*self.meta.nseeds)
             seeds = np.repeat(np.arange(1,self.meta.nseeds+1), num_part)
         else:
             r = rng.uniform(low=0, high=r_max**2, size=num_part)
-            r = np.sqrt(r)
-            th = rng.uniform(low=0, high=2*np.pi, size=num_part)
-            x = r*np.cos(th)
-            y = r*np.sin(th)
+            th = rng.uniform(low=ang_min, high=ang_max*np.pi/180, size=num_part)
+        r = np.sqrt(r)
+        x = r*np.cos(th)
+        y = r*np.sin(th)
 
         # Make dataframe
         self._surv = pd.DataFrame()
@@ -544,7 +675,7 @@ class DA:
 
         # TODO: catch when border tells us that not enough samples are available and larger r or larger Nmin is needed
 
-        print(f"Generating samples... ", end='')
+        print("Generating samples... ", end='')
         # First we create a 'pool' of samples that contains 100 times as many particles as wished.
         # This is to get a reliable distribution to select from later.
         # We make this pool by sampling a uniform ring, from the inner circle of the max_border (with bleed)
@@ -636,7 +767,7 @@ class DA:
         df_new['state'] = 1
         df_new['submitted'] = False
         df_new['finished'] = False
-#         self._create_pairs()   # Needs to only act on non-finished particles ...        
+#         self._create_pairs()   # Needs to only act on non-finished particles ...
         self._surv = pd.concat([
                             self._surv,
                             df_new
@@ -809,7 +940,7 @@ class DA:
         # Build tracker(s) if not yet done
         if self.meta.nseeds == 0:
             if self.line.tracker is None:
-                print(f"Building tracker.")
+                print("Building tracker.")
                 self.line.build_tracker()
         else:
             if 0 in self.line.keys():

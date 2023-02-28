@@ -148,11 +148,14 @@ class _DAMetaData:
     } #| { field: None for field in _optional_fields}
 
 
-    def __init__(self, name, *, path=Path.cwd(), use_files=False, read_only=False):
+    def __init__(self, name, *, path=Path.cwd(), use_files=False, read_only=False, parallel=False):
         # Remove .meta.json suffix if passed with filename
         if name.split('.')[-2:] == ['meta', 'json']:
             name = name[:-10]
         self._name             = name
+        if parallel and not use_files:
+            use_files = True
+        self._parallel         = parallel
         self._use_files        = use_files
         self.path              = path
         self._store_properties = True
@@ -164,6 +167,7 @@ class _DAMetaData:
         if read_only and not use_files:
             read_only = False
         self._read_only = read_only
+            
 
         if use_files:
             if self.meta_file.exists():
@@ -177,10 +181,14 @@ class _DAMetaData:
                                      + "file in the same folder as the parquet files, or regenerate the metadata file " \
                                      + "manually with xdyna.regenerate_meta_file(). Or, if the parquet files are old/wrong, " \
                                      + "just delete them.")
+                if parallel:
+                    raise ValueError("Cannot create a new DA object on a parallel process!")
                 if read_only:
                     raise ValueError("Specified read_only=True but no files found!")
                 print("Creating new DA object.")
                 self._store()
+
+
 
     @property
     def name(self):
