@@ -1074,6 +1074,8 @@ class DA:
 
     # Not allowed on parallel process
     def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True):
+        if self.meta.nseeds>0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError("The DA computing methods have not been implemented for multiseeds or pairs yet!")
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
         data=self.survival_data.copy()
@@ -1233,6 +1235,8 @@ class DA:
     # Not allowed on parallel process
     def _da_smoothing(self,raw_border_min,raw_border_max,at_turn=None,DA_lim_min=None,
                       removed=pd.DataFrame(columns=['id']), active_warmup=True):
+        if self.meta.nseeds>0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError("The DA computing methods have not been implemented for multiseeds or pairs yet!")
         if at_turn is None:
             at_turn=self.max_turns
         
@@ -1431,6 +1435,8 @@ class DA:
     
     # Not allowed on parallel process
     def calculate_davsturns(self,from_turn=1e3,to_turn=None,nsteps=None):
+        if self.meta.nseeds>0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError("The DA computing methods have not been implemented for multiseeds or pairs yet!")
         if to_turn is None:
             to_turn=self.max_turns
             
@@ -1758,6 +1764,8 @@ class DA:
           * size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
         """
         
+        if self.meta.nseeds>0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError("The DA computing methods have not been implemented for multiseeds or pairs yet!")
         if at_turn is None:
             at_turn=self.max_turns
             
@@ -1827,6 +1835,8 @@ class DA:
           * color: Color of the line (Default="blue").
         """
         
+        if self.meta.nseeds>0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError("The DA computing methods have not been implemented for multiseeds or pairs yet!")
         if at_turn is None:
             at_turn=self.max_turns
             
@@ -1898,6 +1908,8 @@ class DA:
           * c_maxda: Color of the upper da vs turns stat. Set to '' or None will not show theplot (Default: "red").
         """
         
+        if self.meta.nseeds>0 or self.meta.pairs_shift != 0:
+            raise NotImplementedError("The DA computing methods have not been implemented for multiseeds or pairs yet!")
         # Clean kwargs and initiallize parameters
         kwargs=dict(kwargs)
         if 'c' in kwargs:
