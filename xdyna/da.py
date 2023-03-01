@@ -937,57 +937,68 @@ class DA:
             return
         job_id = str(self._active_job)
 
-        # Build tracker(s) if not yet done
+        # Define tracking procedure
+        def track_per_seed(context, tracker, x_norm, y_norm, px_norm, py_norm, zeta, delta, nemitt_x, nemitt_y, nturn):
+            # Create initial particles
+            part = xp.build_particles(_context=context,
+                                      tracker=tracker,
+                                      x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
+                                      nemitt_x=nemitt_x, nemitt_y=nemitt_y
+                                     )
+            # Track
+            tracker.track(particles=part, num_turns=nturn)
+            context.synchronize()
+            return part
+
         if self.meta.nseeds == 0:
+            # Build tracker(s) if not yet done
             if self.line.tracker is None:
                 print("Building tracker.")
                 self.line.build_tracker()
-        else:
-            if 0 in self.line.keys():
-                # Line file dict is 0-indexed
-                seeds = [ seed-1 for seed in seeds ]
-            for seed in seeds:
-                if self.line[seed].tracker is None:
-                    print(f"Building tracker for seed {seed}.")
-                    self.line[seed].build_tracker()
+                
+            # Select initial particles
+            context = self.line.tracker._buffer.context
+            x_norm  = self._surv.loc[part_ids, 'x_norm_in'].to_numpy()
+            y_norm  = self._surv.loc[part_ids, 'y_norm_in'].to_numpy()
+            px_norm = self._surv.loc[part_ids, 'px_norm_in'].to_numpy()
+            py_norm = self._surv.loc[part_ids, 'py_norm_in'].to_numpy()
+            zeta    = self._surv.loc[part_ids, 'zeta_in'].to_numpy()
+            delta   = self._surv.loc[part_ids, 'delta_in'].to_numpy()
 
-        # TODO: DOES NOT WORK WITH SEEDS
-        # Create initial particles
-        x_norm  = self._surv['x_norm_in'].to_numpy()
-        y_norm  = self._surv['y_norm_in'].to_numpy()
-        px_norm = self._surv['px_norm_in'].to_numpy()
-        py_norm = self._surv['py_norm_in'].to_numpy()
-        zeta    = self._surv['zeta_in'].to_numpy()
-        delta   = self._surv['delta_in'].to_numpy()
+            self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)
+            part=track_per_seed(context,self.line.tracker,
+                                x_norm, y_norm, px_norm, py_norm, zeta, delta, 
+                                self.nemitt_x, self.nemitt_y, self.meta.max_turns)
+            self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.', logging=logging)
+                
+            # Store results
+            part_id   = context.nparray_from_context_array(part.particle_id)
+            sort      = np.argsort(part_id)
+            x_out     = context.nparray_from_context_array(part.x)[sort]
+            y_out     = context.nparray_from_context_array(part.y)[sort]
+            survturns = context.nparray_from_context_array(part.at_turn)[sort]
+            px_out    = context.nparray_from_context_array(part.px)[sort]
+            py_out    = context.nparray_from_context_array(part.py)[sort]
+            zeta_out  = context.nparray_from_context_array(part.zeta)[sort]
+            delta_out = context.nparray_from_context_array(part.delta)[sort]
+            s_out     = context.nparray_from_context_array(part.s)[sort]
+            state     = context.nparray_from_context_array(part.state)[sort]
 
-        context = self.line.tracker._buffer.context
-        part = xp.build_particles(_context=context,
-                          tracker=self.line.tracker,
-                          x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
-                          nemitt_x=self.nemitt_x, nemitt_y=self.nemitt_y
-                         )
-        # Track
-        self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)
-        self.line.tracker.track(particles=part, num_turns=self.meta.max_turns)
-        context.synchronize()
-        self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.', logging=logging)
-
-        # Store results
-        part_id   = context.nparray_from_context_array(part.particle_id)
-        sort      = np.argsort(part_id)
-        x_out     = context.nparray_from_context_array(part.x)[sort]
-        y_out     = context.nparray_from_context_array(part.y)[sort]
-        survturns = context.nparray_from_context_array(part.at_turn)[sort]
-        px_out    = context.nparray_from_context_array(part.px)[sort]
-        py_out    = context.nparray_from_context_array(part.py)[sort]
-        zeta_out  = context.nparray_from_context_array(part.zeta)[sort]
-        delta_out = context.nparray_from_context_array(part.delta)[sort]
-        s_out     = context.nparray_from_context_array(part.s)[sort]
-        state     = context.nparray_from_context_array(part.state)[sort]
-
-        if self.surv_exists():
-            with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
-                self.read_surv(pf)
+            if self.surv_exists():
+                with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                    self.read_surv(pf)
+                    self._surv.loc[part_ids, 'finished'] = True
+                    self._surv.loc[part_ids, 'x_out'] = x_out
+                    self._surv.loc[part_ids, 'y_out'] = y_out
+                    self._surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
+                    self._surv.loc[part_ids, 'px_out'] = px_out
+                    self._surv.loc[part_ids, 'py_out'] = py_out
+                    self._surv.loc[part_ids, 'zeta_out'] = zeta_out
+                    self._surv.loc[part_ids, 'delta_out'] = delta_out
+                    self._surv.loc[part_ids, 's_out'] = s_out
+                    self._surv.loc[part_ids, 'state'] = state
+                    self.write_surv(pf)
+            else:
                 self._surv.loc[part_ids, 'finished'] = True
                 self._surv.loc[part_ids, 'x_out'] = x_out
                 self._surv.loc[part_ids, 'y_out'] = y_out
@@ -997,18 +1008,129 @@ class DA:
                 self._surv.loc[part_ids, 'zeta_out'] = zeta_out
                 self._surv.loc[part_ids, 'delta_out'] = delta_out
                 self._surv.loc[part_ids, 's_out'] = s_out
-                self._surv.loc[part_ids, 'state'] = state
-                self.write_surv(pf)
         else:
-            self._surv.loc[part_ids, 'finished'] = True
-            self._surv.loc[part_ids, 'x_out'] = x_out
-            self._surv.loc[part_ids, 'y_out'] = y_out
-            self._surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
-            self._surv.loc[part_ids, 'px_out'] = px_out
-            self._surv.loc[part_ids, 'py_out'] = py_out
-            self._surv.loc[part_ids, 'zeta_out'] = zeta_out
-            self._surv.loc[part_ids, 'delta_out'] = delta_out
-            self._surv.loc[part_ids, 's_out'] = s_out
+            if 0 in self.line.keys():
+                # Line file dict is 0-indexed
+                seeds = [ seed-1 for seed in seeds ]
+            for seed in seeds:
+                # Build tracker(s) if not yet done
+                if self.line[seed].tracker is None:
+                    print(f"Building tracker for seed {seed}.")
+                    self.line[seed].build_tracker()
+                    
+                # Select initial particles
+                context = self.line[seed].tracker._buffer.context
+                part_ids_seed = part_ids[self._surv.loc[part_ids, 'seed']==seed]
+                x_norm  = self._surv.loc[part_ids_seed, 'x_norm_in'].to_numpy()
+                y_norm  = self._surv.loc[part_ids_seed, 'y_norm_in'].to_numpy()
+                px_norm = self._surv.loc[part_ids_seed, 'px_norm_in'].to_numpy()
+                py_norm = self._surv.loc[part_ids_seed, 'py_norm_in'].to_numpy()
+                zeta    = self._surv.loc[part_ids_seed, 'zeta_in'].to_numpy()
+                delta   = self._surv.loc[part_ids_seed, 'delta_in'].to_numpy()
+
+                self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)
+                part=track_per_seed(context,self.line[seed].tracker,
+                                    x_norm, y_norm, px_norm, py_norm, zeta, delta, 
+                                    self.nemitt_x, self.nemitt_y, self.meta.max_turns)
+
+                self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.', logging=logging)
+
+                # Store results
+                part_id   = context.nparray_from_context_array(part.particle_id)
+                sort      = np.argsort(part_id)
+                x_out     = context.nparray_from_context_array(part.x)[sort]
+                y_out     = context.nparray_from_context_array(part.y)[sort]
+                survturns = context.nparray_from_context_array(part.at_turn)[sort]
+                px_out    = context.nparray_from_context_array(part.px)[sort]
+                py_out    = context.nparray_from_context_array(part.py)[sort]
+                zeta_out  = context.nparray_from_context_array(part.zeta)[sort]
+                delta_out = context.nparray_from_context_array(part.delta)[sort]
+                s_out     = context.nparray_from_context_array(part.s)[sort]
+                state     = context.nparray_from_context_array(part.state)[sort]
+
+                if self.surv_exists():
+                    with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+                        self.read_surv(pf)
+                        self._surv.loc[part_ids_seed, 'finished'] = True
+                        self._surv.loc[part_ids_seed, 'x_out'] = x_out
+                        self._surv.loc[part_ids_seed, 'y_out'] = y_out
+                        self._surv.loc[part_ids_seed, 'nturns'] = survturns.astype(np.int64)
+                        self._surv.loc[part_ids_seed, 'px_out'] = px_out
+                        self._surv.loc[part_ids_seed, 'py_out'] = py_out
+                        self._surv.loc[part_ids_seed, 'zeta_out'] = zeta_out
+                        self._surv.loc[part_ids_seed, 'delta_out'] = delta_out
+                        self._surv.loc[part_ids_seed, 's_out'] = s_out
+                        self._surv.loc[part_ids_seed, 'state'] = state
+                        self.write_surv(pf)
+                else:
+                    self._surv.loc[part_ids_seed, 'finished'] = True
+                    self._surv.loc[part_ids_seed, 'x_out'] = x_out
+                    self._surv.loc[part_ids_seed, 'y_out'] = y_out
+                    self._surv.loc[part_ids_seed, 'nturns'] = survturns.astype(np.int64)
+                    self._surv.loc[part_ids_seed, 'px_out'] = px_out
+                    self._surv.loc[part_ids_seed, 'py_out'] = py_out
+                    self._surv.loc[part_ids_seed, 'zeta_out'] = zeta_out
+                    self._surv.loc[part_ids_seed, 'delta_out'] = delta_out
+                    self._surv.loc[part_ids_seed, 's_out'] = s_out
+
+#         # TODO: DOES NOT WORK WITH SEEDS
+#         # Create initial particles
+#         x_norm  = self._surv.loc[part_ids, 'x_norm_in'].to_numpy()
+#         y_norm  = self._surv.loc[part_ids, 'y_norm_in'].to_numpy()
+#         px_norm = self._surv.loc[part_ids, 'px_norm_in'].to_numpy()
+#         py_norm = self._surv.loc[part_ids, 'py_norm_in'].to_numpy()
+#         zeta    = self._surv.loc[part_ids, 'zeta_in'].to_numpy()
+#         delta   = self._surv.loc[part_ids, 'delta_in'].to_numpy()
+
+#         context = self.line.tracker._buffer.context
+#         part = xp.build_particles(_context=context,
+#                           tracker=self.line.tracker,
+#                           x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
+#                           nemitt_x=self.nemitt_x, nemitt_y=self.nemitt_y
+#                          )
+#         # Track
+#         self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)
+#         self.line.tracker.track(particles=part, num_turns=self.meta.max_turns)
+#         context.synchronize()
+#         self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.', logging=logging)
+
+#         # Store results
+#         part_id   = context.nparray_from_context_array(part.particle_id)
+#         sort      = np.argsort(part_id)
+#         x_out     = context.nparray_from_context_array(part.x)[sort]
+#         y_out     = context.nparray_from_context_array(part.y)[sort]
+#         survturns = context.nparray_from_context_array(part.at_turn)[sort]
+#         px_out    = context.nparray_from_context_array(part.px)[sort]
+#         py_out    = context.nparray_from_context_array(part.py)[sort]
+#         zeta_out  = context.nparray_from_context_array(part.zeta)[sort]
+#         delta_out = context.nparray_from_context_array(part.delta)[sort]
+#         s_out     = context.nparray_from_context_array(part.s)[sort]
+#         state     = context.nparray_from_context_array(part.state)[sort]
+
+#         if self.surv_exists():
+#             with ProtectFile(self.meta.surv_file, 'r+b', wait=_db_access_wait_time) as pf:
+#                 self.read_surv(pf)
+#                 self._surv.loc[part_ids, 'finished'] = True
+#                 self._surv.loc[part_ids, 'x_out'] = x_out
+#                 self._surv.loc[part_ids, 'y_out'] = y_out
+#                 self._surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
+#                 self._surv.loc[part_ids, 'px_out'] = px_out
+#                 self._surv.loc[part_ids, 'py_out'] = py_out
+#                 self._surv.loc[part_ids, 'zeta_out'] = zeta_out
+#                 self._surv.loc[part_ids, 'delta_out'] = delta_out
+#                 self._surv.loc[part_ids, 's_out'] = s_out
+#                 self._surv.loc[part_ids, 'state'] = state
+#                 self.write_surv(pf)
+#         else:
+#             self._surv.loc[part_ids, 'finished'] = True
+#             self._surv.loc[part_ids, 'x_out'] = x_out
+#             self._surv.loc[part_ids, 'y_out'] = y_out
+#             self._surv.loc[part_ids, 'nturns'] = survturns.astype(np.int64)
+#             self._surv.loc[part_ids, 'px_out'] = px_out
+#             self._surv.loc[part_ids, 'py_out'] = py_out
+#             self._surv.loc[part_ids, 'zeta_out'] = zeta_out
+#             self._surv.loc[part_ids, 'delta_out'] = delta_out
+#             self._surv.loc[part_ids, 's_out'] = s_out
 
         self._update_job_log({
             'finished_time': datetime.datetime.now().isoformat(),
