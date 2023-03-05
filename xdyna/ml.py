@@ -293,7 +293,7 @@ class MLBorder:
         if n_0 < min_samples_per_label:
             self._ml_possible = False
             self._ml_impossible_reason = 0
-            self._extra_sample_r_region = [r_0.min()*(1-margin), r_0.max*(1+margin)]
+            self._extra_sample_r_region = [r_0.min()*(1-margin), r_0.max()*(1+margin)]
         if n_1 < min_samples_per_label:
             self._ml_possible = False
             self._ml_impossible_reason = 1
