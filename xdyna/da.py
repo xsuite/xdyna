@@ -5,7 +5,8 @@ import datetime
 import time
 import tempfile
 
-from scipy import interpolate, integrate
+from scipy import interpolate, integrate, log
+from scipy.special import lambertw as W
 # from scipy.constants import c as clight
 import numpy as np
 from numpy.random import default_rng
@@ -1129,6 +1130,38 @@ class DA:
 
 
     # Not allowed on parallel process
+    def get_da(self,at_turn=None,seed=None,lower_boundary=True):
+        '''
+        Return the DA estimation at a turn in the form of a DataFrame with the following columns:
+        ['turn','border','avg','min','max']
+        
+        Inputs:
+          * at_turn: turn at which this estimation must be computed.
+          * seed: for multiseed simulation, the seed must be specified (Default=None).
+          * lower_boundary: boulean if you want the lower or the upper da estimation returned (Default=True).
+        '''
+          
+        if at_turn is None:
+            at_turn=self.max_turns
+        if self._lower_davsturns is None or self._upper_davsturns is None:
+            self.calculate_da(at_turn=at_turn,smoothing=True)
+        if self.meta.nseeds!=0 and seed is None:
+            raise ValueError('Please specify the seed number for multiseeds simulation.')
+        
+        if self.meta.nseeds==0:
+            if lower_boundary:
+                davsturns=self._lower_davsturns
+            else:
+                davsturns=self._upper_davsturns
+        else:
+            if lower_boundary:
+                davsturns=self._lower_davsturns[seed]
+            else:
+                davsturns=self._upper_davsturns[seed]
+        return davsturns.loc[davsturns.loc[davsturns.turn<=at_turn,'turn'].idxmax(),:]
+
+
+    # Not allowed on parallel process
     def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True):
         if self.meta.pairs_shift != 0:
             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
@@ -2197,6 +2230,14 @@ class DA:
 # Function to cut out islands: only keep the turn number if smaller than the previous one.
 # Otherwise, replace by previous turn number.
 descend = np.frompyfunc(lambda x, y: y if y < x else x, 2, 1)
+
+# Models for davsturn fitting
+# Taken from https://journals.aps.org/prab/pdf/10.1103/PhysRevAccelBeams.22.104003
+Model_2  = lambda N, rho, K, N0=1: rho * ( K/( K2*np.exp(1)*log(N/N0) ) )**K  # Eq. 20
+Model_2b = lambda N, btilde, B, K, N0=1: btilde/( B*log(N/N0) )**K            # Eq. 35a
+
+Model_4  = lambda N, rho, K, lmbd=0.5: rho /( -2*np.exp(1)*lmbd*W( (-1/(2*np.exp(1)*lmbd)) * (rho/6)**(1/K) * (8*N/7)**(-1/(lmbd*K)) ,k=-1) )**K  # Eq. 23
+Model_4b = lambda N, btilde, B, K, N0=1: btilde /(-(0.5*K*B) * W( (-2/(K*B)) * (N/N0)**(-2/K) ,k=-1) )**K  # Eq. 35c
 
 def _calculate_radial_evo(data):
     # We select the window in number of turns for which each angle has values
