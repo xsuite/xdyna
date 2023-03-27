@@ -2107,8 +2107,8 @@ class DA:
                 else:
                     ax.plot(x,y,linestyle=linestyle,color=c_boundary_max,alpha=alpha,label=label+' (max)')
                 
-            ax.set_xlabel(r'angle [$^{\circ}$]')
-            ax.set_ylabel(r'amplitude [$\sigma$]')
+            ax.set_xlabel(r'x [$\sigma$]')
+            ax.set_ylabel(r'y [$\sigma$]')
             
         else:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
