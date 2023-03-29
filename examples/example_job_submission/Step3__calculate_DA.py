@@ -42,6 +42,10 @@ to_t=DA.max_turns
 
 DA.calculate_davsturns(from_turn=from_t,to_turn=to_t)
 
+# Using "calculate_davsturns" might result in improving the DA estimation in case of random particle
+# distribution as the code will use DA estimation from other turns in order to constrain DA at higher
+# turns.
+
 
 # Plots
 # -------------------------------------------------------------
@@ -56,8 +60,8 @@ fig, ax=plt.subplots(2,1,figsize=(10,10));
 DA.plot_particles(ax[0], 
                   at_turn=t,             # Status at this turn
                   type_plot=type_plot,   # Plot type: 'cartesian' or 'polar'
-                  show_surviving=True,   # True to plot surviving parts
-                  show_losses=True,      # True to plot losses
+                  csurviving="blue",     # Color for surviving parts.
+                  closses="red",         # Color for losses.
                   size_scaling="log",    # Losses dot size: 'log', 'linear' or None 
                   alpha=1)
 
@@ -68,16 +72,23 @@ DA.plot_particles(ax[0],
 DA.plot_da_border(ax[0], 
                   at_turn=t,             # Status at this turn
                   type_plot=type_plot,   # Plot type: 'cartesian' or 'polar'
+                  clower="blue",         # Color for lower da estimation.
+                  cupper="red",          # Color for upper da estimation.
                   alpha=1, 
                   label="DA")
-ax[0].set_title('DA')
+ax[0].set_title(f'DA at {t}')
 ax[0].legend(prop={'size': 15})
 
 
 # This routine plots the evolution of the DA (minimum, average and maximum values) as a function of turns. 
 # Similarly to "calculate_davsturns" the turn range must be given. The routine also plots the values for 
 # the upper and lower estimation of the DA.
-DA.plot_davsturns_border(ax[1], from_turn=from_t, to_turn=to_t)
+DA.plot_davsturns_border(ax[1], 
+                         from_turn=from_t, 
+                         to_turn=to_t,
+                         clower="blue",  # Color for lower da estimation.
+                         cupper="red"    # Color for upper da estimation.
+                        )
 ax[1].set_title('DA vs Turns')
 ax[1].legend(prop={'size': 15})
 

@@ -1960,8 +1960,8 @@ class DA:
     # ============================ Plot DA ============================
     # =================================================================
 
-    def plot_particles(self,ax, at_turn=None, type_plot="polar", seed=None, show_surviving=True, show_losses=True, 
-                       closses="red", csurviving="blue", size_scaling="log",alpha=1):
+    def plot_particles(self,ax, at_turn=None, type_plot="polar", seed=None,
+                       closses="red", csurviving="blue", size_scaling="log", **kwargs):
         """
         Scatter plot of the lost and surviving particles.
         
@@ -1969,10 +1969,8 @@ class DA:
           * at_turn: all particles surviving at least this number of turns are considered as surviving.
           * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
           * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
-          * show_surviving: Plot surviving particles if true (Default=True).
-          * show_losses: Plot lost particles if true (Default=True).
-          * csurviving: Color of surviving dots (Default="blue").
-          * closses: Color of losses dots (Default="red").
+          * csurviving: Color of surviving dots (Default="blue"). Use "" to disable.
+          * closses: Color of losses dots (Default="red"). Use "" to disable.
           * size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
         """
         
@@ -1982,7 +1980,17 @@ class DA:
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
         if self.meta.nseeds>0 and seed==None:
-            raise ValueError('For multiseed simulation, please specify the seed.')
+            raise ValueError('For multiseed simulation, please specify a seed number.')
+        # Clean kwargs and initiallize parameters
+        kwargs=dict(kwargs)
+        if 'c' in kwargs:
+            kwargs.pop('c')
+        if 'color' in kwargs:
+            kwargs.pop('color')
+#         label=''
+        if 'label' in kwargs:
+#             label=kwargs['label']
+            kwargs.pop('label')
             
         if at_turn is None:
             at_turn=self.max_turns
@@ -1996,10 +2004,10 @@ class DA:
                 data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
                 data['amplitude']= np.abs(  data['x']+1j*data['y'])
                 
-            if show_surviving:
+            if csurviving: #show_surviving:
                 surv=data.loc[data['nturns']>=at_turn,:]
-                ax.scatter(surv['angle'],surv['amplitude'],color=csurviving,alpha=alpha,label="Surv.")
-            if show_losses:
+                ax.scatter(surv['angle'],surv['amplitude'],color=csurviving,label="Surv.", **kwargs)
+            if closses: #show_losses:
                 import matplotlib.pyplot as plt
                 
                 loss=data.loc[data['nturns']<at_turn,:]
@@ -2010,7 +2018,7 @@ class DA:
                     size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
                 else:
                     size=None
-                ax.scatter(loss['angle'],loss['amplitude'],size**2,color=closses,alpha=alpha,label="Loss.")
+                ax.scatter(loss['angle'],loss['amplitude'],size**2,color=closses,label="Loss.", **kwargs)
                 
                 ax.set_xlabel(r'angle [$^{\circ}$]')
                 ax.set_ylabel(r'amplitude [$\sigma$]')
@@ -2020,10 +2028,10 @@ class DA:
                 data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
                 data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
                 
-            if show_surviving:
+            if csurviving: #show_surviving:
                 surv=data.loc[data['nturns']>=at_turn,:]
-                ax.scatter(surv['x'],surv['y'],color=csurviving,alpha=alpha,label="Surv.")
-            if show_losses:
+                ax.scatter(surv['x'],surv['y'],color=csurviving,label="Surv.", **kwargs)
+            if closses: #show_losses:
                 import matplotlib.pyplot as plt
                 
                 loss=data.loc[data['nturns']<at_turn,:]
@@ -2034,7 +2042,7 @@ class DA:
                     size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
                 else:
                     size=None
-                ax.scatter(loss['x'],loss['y'],size**2,color=closses,alpha=alpha,label="Loss.")
+                ax.scatter(loss['x'],loss['y'],size**2,color=closses,label="Loss.", **kwargs)
                 
                 ax.set_xlabel(r'x [$\sigma$]')
                 ax.set_ylabel(r'y [$\sigma$]')
@@ -2043,8 +2051,7 @@ class DA:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
 
             
-    def plot_da_border(self,ax, at_turn=None, seed=None, type_plot="polar", 
-                       c_boundary_min="blue", c_boundary_max="red", ls='-', linestyle=None, alpha=1, label="DA"):
+    def plot_da_border(self,ax, at_turn=None, seed=None, type_plot="polar", clower="blue", cupper="red", **kwargs):
         """
         Plot the DA border.
         
@@ -2052,13 +2059,24 @@ class DA:
           * at_turn: all particles surviving at least this number of turns are considered as surviving.
           * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
           * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
-          * color: Color of the line (Default="blue").
+          * clower: Color of the lower DA estimation (Default="blue"). Use "" to disable.
+          * cupper: Color of the upper DA estimation (Default="red"). Use "" to disable.
         """
         
         if self.meta.pairs_shift != 0:
             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
         if self.meta.nseeds>0 and seed==None:
-            raise ValueError('For multiseed simulation, please specify the seed.')
+            raise ValueError('For multiseed simulation, please specify a seed number.')
+        # Clean kwargs and initiallize parameters
+        kwargs=dict(kwargs)
+        if 'c' in kwargs:
+            kwargs.pop('c')
+        if 'color' in kwargs:
+            kwargs.pop('color')
+        label=''
+        if 'label' in kwargs:
+            label=kwargs['label']
+            kwargs.pop('label')
             
         if at_turn is None:
             at_turn=self.max_turns
@@ -2089,39 +2107,39 @@ class DA:
         sort = np.argsort(angle)
         angle= angle[sort]; amplitude_min = amplitude_min[sort]; amplitude_max = amplitude_max[sort]
         if type_plot=="polar":
-            if c_boundary_min:
-                if linestyle is None:
-                    ax.plot(angle,amplitude_min,ls=ls,color=c_boundary_min,alpha=alpha,label=label+' (min)')
-                else:
-                    ax.plot(angle,amplitude_min,linestyle=linestyle,color=c_boundary_min,alpha=alpha,label=label+' (min)')
+            if clower:
+#                 if linestyle is None:
+                ax.plot(angle,amplitude_min,color=clower,label=label+' (min)',**kwargs)
+#                 else:
+#                     ax.plot(angle,amplitude_min,linestyle=linestyle,color=clower,label=label+' (min)')
 
-            if c_boundary_max:
-                if linestyle is None:
-                    ax.plot(angle,amplitude_max,ls=ls,color=c_boundary_max,alpha=alpha,label=label+' (max)')
-                else:
-                    ax.plot(angle,amplitude_max,linestyle=linestyle,color=c_boundary_max,alpha=alpha,label=label+' (max)')
+            if cupper:
+#                 if linestyle is None:
+                ax.plot(angle,amplitude_max,color=cupper,label=label+' (max)',**kwargs)
+#                 else:
+#                     ax.plot(angle,amplitude_max,linestyle=linestyle,color=cupper,alpha=alpha,label=label+' (max)')
                     
             ax.set_xlabel(r'angle [$^{\circ}$]')
             ax.set_ylabel(r'amplitude [$\sigma$]')
                 
         elif type_plot=="cartesian":
-            if c_boundary_min:
+            if clower:
                 x= amplitude_min*np.cos(angle*np.pi/180)
                 y= amplitude_min*np.sin(angle*np.pi/180)
 
-                if linestyle is None:
-                    ax.plot(x,y,ls=ls,color=c_boundary_min,alpha=alpha,label=label+' (min)')
-                else:
-                    ax.plot(x,y,linestyle=linestyle,color=c_boundary_min,alpha=alpha,label=label+' (min)')
+#                 if linestyle is None:
+                ax.plot(x,y,color=clower,label=label+' (min)',**kwargs)
+#                 else:
+#                     ax.plot(x,y,linestyle=linestyle,color=clower,alpha=alpha,label=label+' (min)')
                     
-            if c_boundary_max:
+            if cupper:
                 x= amplitude_max*np.cos(angle*np.pi/180)
                 y= amplitude_max*np.sin(angle*np.pi/180)
 
-                if linestyle is None:
-                    ax.plot(x,y,ls=ls,color=c_boundary_max,alpha=alpha,label=label+' (max)')
-                else:
-                    ax.plot(x,y,linestyle=linestyle,color=c_boundary_max,alpha=alpha,label=label+' (max)')
+#                 if linestyle is None:
+                ax.plot(x,y,color=cupper,label=label+' (max)',**kwargs)
+#                 else:
+#                     ax.plot(x,y,linestyle=linestyle,color=cupper,alpha=alpha,label=label+' (max)')
                 
             ax.set_xlabel(r'x [$\sigma$]')
             ax.set_ylabel(r'y [$\sigma$]')
@@ -2130,15 +2148,16 @@ class DA:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
 
             
-    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, c_minda="blue", c_maxda="red", **kwargs):
+    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", **kwargs):
         """
         Plot the DA vs turns.
         
         Inputs:
           * from_turn,at_turn: plot da vs turn from 'from_turn' to 'at_turn' turns (Default: from_turn=1e3, at_turn=max_turns).
           * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
-          * c_minda: Color of the lower da vs turns stat. Set to '' or None will not show theplot (Default: "blue").
-          * c_maxda: Color of the upper da vs turns stat. Set to '' or None will not show theplot (Default: "red").
+          * clower: Color of the lower da vs turns stat. Set to '' will not show the plot (Default: "blue").
+          * cupper: Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
+          
         """
         
         if self.meta.pairs_shift != 0:
@@ -2179,7 +2198,7 @@ class DA:
         lturns_prev=[t-1 for t in lturns_data if t>from_turn and t<=to_turn]
                 
                 
-        if c_maxda is not None and c_maxda:
+        if cupper:
             # Load Data
             davsturns_avg=upper_da.loc[lturns_data,'avg'] ;
             davsturns_min=upper_da.loc[lturns_data,'min'] ;
@@ -2198,13 +2217,13 @@ class DA:
             y_max=np.array(davsturns_max[lturns], dtype=float)
 
             # Plot the results
-            ax.plot(lturns,y_avg,ls="-.",label=label,color=c_maxda,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_min,ls="-", label='',   color=c_maxda,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_max,ls="-", label='',   color=c_maxda,alpha=alpha,**kwargs);
+            ax.plot(lturns,y_avg,ls="-.",label=label,color=cupper,alpha=alpha,**kwargs);
+            ax.plot(lturns,y_min,ls="-", label='',   color=cupper,alpha=alpha,**kwargs);
+            ax.plot(lturns,y_max,ls="-", label='',   color=cupper,alpha=alpha,**kwargs);
 
-            ax.fill_between(lturns,y_min, y_max,color=c_maxda,alpha=alpha*0.1,**kwargs)
+            ax.fill_between(lturns,y_min, y_max,color=cupper,alpha=alpha*0.1,**kwargs)
         
-        if c_minda is not None and c_minda:
+        if clower:
             # Load Data
             davsturns_avg=lower_da.loc[lturns_data,'avg'] ;
             davsturns_min=lower_da.loc[lturns_data,'min'] ;
@@ -2223,11 +2242,11 @@ class DA:
             y_max=np.array(davsturns_max[lturns], dtype=float)
 
             # Plot the results
-            ax.plot(lturns,y_avg,ls="-.",label=label,color=c_minda,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_min,ls="-", label='',   color=c_minda,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_max,ls="-", label='',   color=c_minda,alpha=alpha,**kwargs);
+            ax.plot(lturns,y_avg,ls="-.",label=label,color=clower,alpha=alpha,**kwargs);
+            ax.plot(lturns,y_min,ls="-", label='',   color=clower,alpha=alpha,**kwargs);
+            ax.plot(lturns,y_max,ls="-", label='',   color=clower,alpha=alpha,**kwargs);
 
-            ax.fill_between(lturns,y_min, y_max,color=c_minda,alpha=alpha*0.1,**kwargs)
+            ax.fill_between(lturns,y_min, y_max,color=clower,alpha=alpha*0.1,**kwargs)
         
         ax.set_xlabel(r'Turns [1]')
         ax.set_ylabel(r'amplitude [$\sigma$]')
