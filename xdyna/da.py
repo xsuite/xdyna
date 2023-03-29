@@ -1158,7 +1158,7 @@ class DA:
                 davsturns=self._lower_davsturns[seed]
             else:
                 davsturns=self._upper_davsturns[seed]
-        return davsturns.loc[davsturns.loc[davsturns.turn<=at_turn,'turn'].idxmax(),:]
+        return davsturns.loc[davsturns.loc[davsturns.turn<=at_turn,'turn'].astype(float).idxmax(),:]
 
 
     # Not allowed on parallel process
@@ -1727,18 +1727,34 @@ class DA:
                 else:
                     self._lower_davsturns[seed+1]=lower_davsturns
                     self._upper_davsturns[seed+1]=upper_davsturns
-
-#                         self._lower_border[at_turn]=[ border_min ]; #.loc[:,['id','angle','amplitude']] ];
-#                         self._upper_border[at_turn]=[ border_max ]; #.loc[:,['id','angle','amplitude']] ];
-
-#                         self._lower_davsturns[at_turn]    =[ da ]
-#                         self._lower_davsturns_min[at_turn]=[ min(border_min.amplitude) ]
-#                         self._lower_davsturns_max[at_turn]=[ max(border_min.amplitude) ]
-
-#                         self._upper_davsturns[at_turn]    =[ compute_da(new_border_max.angle, new_border_max.amplitude) ]
-#                         self._upper_davsturns_min[at_turn]=[ min(border_max.amplitude) ]
-#                         self._upper_davsturns_max[at_turn]=[ max(border_max.amplitude) ]
+                    
+            if self.meta.nseeds!=0:
+                stat_lower_davsturns=pd.DataFrame({},index=lturns,columns=['turn','border','avg','min','max'])
+                stat_upper_davsturns=pd.DataFrame({},index=lturns,columns=['turn','border','avg','min','max'])
                 
+                lower_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) #,'border'
+                upper_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) #,'border'
+                for at_turn in lturns:
+                    for s in range(1,self.meta.nseeds+1):
+                        DA=self.get_da(at_turn=at_turn,lower_boundary=True)
+                        lower_davsturns.loc[s,'avg']=DA['avg']
+                        lower_davsturns.loc[s,'min']=DA['min']
+                        lower_davsturns.loc[s,'max']=DA['max']
+                        
+                        DA=self.get_da(at_turn=at_turn,lower_boundary=False)
+                        upper_davsturns.loc[s,'avg']=DA['avg']
+                        upper_davsturns.loc[s,'min']=DA['min']
+                        upper_davsturns.loc[s,'max']=DA['max']
+                        
+                    stat_lower_davsturns.loc[at_turn,'avg']=lower_davsturns['avg'].mean()
+                    stat_lower_davsturns.loc[at_turn,'min']=lower_davsturns['avg'].min()
+                    stat_lower_davsturns.loc[at_turn,'max']=lower_davsturns['avg'].max()
+                    
+                    stat_upper_davsturns.loc[at_turn,'avg']=upper_davsturns['avg'].mean()
+                    stat_upper_davsturns.loc[at_turn,'min']=upper_davsturns['avg'].min()
+                    stat_upper_davsturns.loc[at_turn,'max']=upper_davsturns['avg'].max()
+                self._lower_davsturns['stat']=stat_lower_davsturns
+                self._upper_davsturns['stat']=stat_upper_davsturns
                 
     # =================================================================
     # ==================== Manage tracking jobs =======================
