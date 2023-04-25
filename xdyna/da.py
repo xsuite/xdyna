@@ -5,7 +5,7 @@ import datetime
 import time
 import tempfile
 
-from scipy import interpolate, integrate, log
+from scipy import interpolate, integrate
 from scipy.special import lambertw as W
 # from scipy.constants import c as clight
 import numpy as np
@@ -2268,11 +2268,11 @@ descend = np.frompyfunc(lambda x, y: y if y < x else x, 2, 1)
 
 # Models for davsturn fitting
 # Taken from https://journals.aps.org/prab/pdf/10.1103/PhysRevAccelBeams.22.104003
-Model_2  = lambda N, rho, K, N0=1: rho * ( K/( K2*np.exp(1)*log(N/N0) ) )**K  # Eq. 20
-Model_2b = lambda N, btilde, B, K, N0=1: btilde/( B*log(N/N0) )**K            # Eq. 35a
+Model_2  = lambda N, rho, K, N0=1: rho * ( K/( 2*np.exp(1)*np.log(N/N0) ) )**K  # Eq. 20
+Model_2b = lambda N, btilde,K, N0=1, B=1: btilde / ( B*np.log(N/N0) )**K            # Eq. 35a
 
-Model_4  = lambda N, rho, K, lmbd=0.5: rho /( -2*np.exp(1)*lmbd*W( (-1/(2*np.exp(1)*lmbd)) * (rho/6)**(1/K) * (8*N/7)**(-1/(lmbd*K)) ,k=-1) )**K  # Eq. 23
-Model_4b = lambda N, btilde, B, K, N0=1: btilde /(-(0.5*K*B) * W( (-2/(K*B)) * (N/N0)**(-2/K) ,k=-1) )**K  # Eq. 35c
+Model_4  = lambda N, rho, K, lmbd=0.5: rho / ( -2*np.exp(1)*lmbd*np.real(W( (-1/(2*np.exp(1)*lmbd)) * (rho/6)**(1/K) * (8*N/7)**(-1/(lmbd*K)) ,k=-1)) )**K  # Eq. 23
+Model_4b = lambda N, btilde, K, N0=1, B=1: btilde / (-(0.5*K*B)*np.real(W( (-2/(K*B)) * (N/N0)**(-2/K) ,k=-1)) )**K  # Eq. 35c
 
 def _calculate_radial_evo(data):
     # We select the window in number of turns for which each angle has values
