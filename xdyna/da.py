@@ -1130,9 +1130,9 @@ class DA:
 
 
     # Not allowed on parallel process
-    def get_da(self,at_turn=None,seed=None,lower_boundary=True):
+    def get_lower_da(self,at_turn=None,seed=None):
         '''
-        Return the DA estimation at a turn in the form of a DataFrame with the following columns:
+        Return the DA lower estimation at a turn in the form of a DataFrame with the following columns:
         ['turn','border','avg','min','max']
         
         Inputs:
@@ -1149,15 +1149,34 @@ class DA:
             raise ValueError('Please specify the seed number for multiseeds simulation.')
         
         if self.meta.nseeds==0:
-            if lower_boundary:
-                davsturns=self._lower_davsturns
-            else:
-                davsturns=self._upper_davsturns
+            davsturns=self._lower_davsturns
         else:
-            if lower_boundary:
-                davsturns=self._lower_davsturns[seed]
-            else:
-                davsturns=self._upper_davsturns[seed]
+            davsturns=self._lower_davsturns[seed]
+        return davsturns.loc[davsturns.loc[davsturns.turn<=at_turn,'turn'].astype(float).idxmax(),:]
+
+
+    # Not allowed on parallel process
+    def get_upper_da(self,at_turn=None,seed=None):
+        '''
+        Return the DA upper estimation at a turn in the form of a DataFrame with the following columns:
+        ['turn','border','avg','min','max']
+        
+        Inputs:
+          * at_turn: turn at which this estimation must be computed.
+          * seed: for multiseed simulation, the seed must be specified (Default=None).
+        '''
+          
+        if at_turn is None:
+            at_turn=self.max_turns
+        if self._lower_davsturns is None or self._upper_davsturns is None:
+            self.calculate_da(at_turn=at_turn,smoothing=True)
+        if self.meta.nseeds!=0 and seed is None:
+            raise ValueError('Please specify the seed number for multiseeds simulation.')
+        
+        if self.meta.nseeds==0:
+            davsturns=self._upper_davsturns
+        else:
+            davsturns=self._upper_davsturns[seed]
         return davsturns.loc[davsturns.loc[davsturns.turn<=at_turn,'turn'].astype(float).idxmax(),:]
 
 
@@ -1736,12 +1755,12 @@ class DA:
                 upper_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) #,'border'
                 for at_turn in lturns:
                     for s in range(1,self.meta.nseeds+1):
-                        DA=self.get_da(at_turn=at_turn,lower_boundary=True)
+                        DA=self.get_lower_da(at_turn=at_turn)
                         lower_davsturns.loc[s,'avg']=DA['avg']
                         lower_davsturns.loc[s,'min']=DA['min']
                         lower_davsturns.loc[s,'max']=DA['max']
                         
-                        DA=self.get_da(at_turn=at_turn,lower_boundary=False)
+                        DA=self.get_upper_da(at_turn=at_turn)
                         upper_davsturns.loc[s,'avg']=DA['avg']
                         upper_davsturns.loc[s,'min']=DA['min']
                         upper_davsturns.loc[s,'max']=DA['max']
