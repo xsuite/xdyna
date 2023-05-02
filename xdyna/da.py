@@ -1183,8 +1183,21 @@ class DA:
 
     # Not allowed on parallel process
     def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True):
-        if self.meta.pairs_shift != 0:
-            raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
+        '''
+        Compute the DA upper and lower estimation at a specific turn in the form of a pandas table:
+        ['turn','border','avg','min','max']
+        
+        or for multiseeds:
+        {seed:['turn','border','avg','min','max'],'stat':['turn','avg','min','max']}
+        
+        Inputs:
+          * at_turn: turn at which this estimation must be computed (Default=max_turns).
+          * angular_precision: angular precision in [deg.] for the raw estimation of the borders (Default=10). It is better to use high value in order to minimise the risk of catching stability island.
+          * smoothing: True in order to smooth the borders for the random particle distribution (Default=True).
+          
+        Warning: The borders might change after using calculate_davsturns as it imposes turn-by-turn monoticity.
+        '''
+        
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
         
@@ -1360,7 +1373,18 @@ class DA:
 
     
     # Not allowed on parallel process
-    def calculate_davsturns(self,from_turn=1e3,to_turn=None,nsteps=None):
+    def calculate_davsturns(self,from_turn=1e3,to_turn=None):#,nsteps=None
+        '''
+        Compute the DA upper and lower evolution from a specific turn to another in the form of a pandas table:
+        ['turn','border','avg','min','max']
+        
+        or for multiseeds:
+        {seed:['turn','border','avg','min','max'],'stat':['turn','avg','min','max']}
+        
+        Inputs:
+          * from_turn: first turn at which this estimation must be computed (Default=1e3).
+          * to_turn: last turn at which this estimation must be computed (Default=max_turns).
+        '''
         if self.meta.pairs_shift != 0:
             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
             
@@ -2023,7 +2047,6 @@ class DA:
           * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
           * clower: Color of the lower da vs turns stat. Set to '' will not show the plot (Default: "blue").
           * cupper: Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
-          
         """
         
         if self.meta.pairs_shift != 0:
@@ -2049,7 +2072,7 @@ class DA:
             to_turn=self.max_turns
             
         if self._lower_davsturns is None:
-            self.calculate_davsturns(from_turn=from_turn,to_turn=to_turn,nsteps=None)
+            self.calculate_davsturns(from_turn=from_turn,to_turn=to_turn)#,nsteps=None
             
         if self.meta.nseeds==0:
             lower_da=self._lower_davsturns
