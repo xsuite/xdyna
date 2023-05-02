@@ -140,6 +140,8 @@ class DA:
             df['nturns2'] = np.array(self._surv.loc[~orig,'nturns'])
             df['state1'] = np.array(self._surv.loc[orig,'state'])
             df['state2'] = np.array(self._surv.loc[~orig,'state'])
+            df['nturns'] = df.loc[:,['nturns1','nturns2']].min(axis=1)
+            df['state']  = df.loc[:,['state1','state2']].min(axis=1)
         
         return df.rename(columns = {
                     'x_norm_in':'x', 'px_norm_in':'px', 'y_norm_in':'y', 'py_norm_in':'py', 'delta_in':'delta', \
@@ -1493,14 +1495,14 @@ class DA:
                     border_max=new_border_max
 
                     # Save DA
-                    lower_davsturns.loc[at_turn,'turn']  =at_turn
+                    lower_davsturns.loc[at_turn,'turn'  ]=at_turn
                     lower_davsturns.loc[at_turn,'border']=[ border_min ]
                     lower_davsturns.loc[at_turn,'avg'   ]=da
                     lower_davsturns.loc[at_turn,'min'   ]=min(border_min.amplitude)
 #                     lower_davsturns.loc[at_turn,'min'   ]=new_DA_lim_min=min(border_min.amplitude)
                     lower_davsturns.loc[at_turn,'max'   ]=max(border_min.amplitude)
 
-                    upper_davsturns.loc[at_turn,'turn']  =at_turn
+                    upper_davsturns.loc[at_turn,'turn'  ]=at_turn
                     upper_davsturns.loc[at_turn,'border']=[ border_max ]
                     upper_davsturns.loc[at_turn,'avg'   ]=compute_da(border_max.angle,border_max.amplitude)
                     upper_davsturns.loc[at_turn,'min'   ]=min(border_max.amplitude)
@@ -1508,8 +1510,8 @@ class DA:
                     
                 if upper_notmonotonius:
                     # Impose Monotonicity of the upper max value
-                    prev_DA_lim_max=max(upper_davsturns.loc[:,'max'])
-                    prev_DA_lim_max=max(upper_davsturns.loc[:,'max'])
+                    prev_DA_lim_min=lower_davsturns.loc[min(lturns),'min']
+                    prev_DA_lim_max=upper_davsturns.loc[min(lturns),'max']
                     for idx in range(len(lturns)):
                         at_turn=lturns[idx]
                         DA_lim_max=prev_DA_lim_max
@@ -1536,7 +1538,7 @@ class DA:
                             lower_davsturns.loc[at_turn,'border']=[ new_border_min ]
                             lower_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_min.angle, new_border_min.amplitude)
                             lower_davsturns.loc[at_turn,'min'   ]=min(new_border_min.amplitude)
-        #                     lower_davsturns.loc[at_turn,'min'   ]=new_DA_lim_min=min(new_border_min.amplitude)
+#                             lower_davsturns.loc[at_turn,'min'   ]=new_DA_lim_min=min(new_border_min.amplitude)
                             lower_davsturns.loc[at_turn,'max'   ]=max(new_border_min.amplitude)
 
                             upper_davsturns.loc[at_turn,'border']=[ new_border_max ]
@@ -1551,11 +1553,9 @@ class DA:
                             DA_lim_min=prev_DA_lim_min
                             border_min=new_border_min
                             if any(lower_davsturns.loc[lturns[:idx-1],'min']<DA_lim_min):
-                                
+#                                 print('Check 1')
                                 for rc in reversed(lturns[:idx-1]):
                                     if lower_davsturns.loc[rc,'min']<DA_lim_min:
-#                                         surv_rc=data.loc[data.nturns>=rc,:]
-
                                         raw_border_min=border_min #lower_davsturns.loc[rc,'border'][0]
                                         raw_border_max=upper_davsturns.loc[rc,'border'][0]
                                         DA_lim_max=upper_davsturns.loc[rc,'max']
@@ -1566,13 +1566,14 @@ class DA:
                                                                                     DA_lim_min=DA_lim_min,DA_lim_max=DA_lim_max,
                                                                                     active_warmup=False)
 
-#                                         new_da=compute_da(new_border_min.angle,new_border_min.amplitude)
-#                                         new_DA_lim_min=min(new_border_min.amplitude)
 
                                         # Check if DA decrease with the turns
-#                                         if new_da>=da:
-#                                             da=new_da
-#                                             border_min=new_border_min;
+                                        new_da_min=compute_da(new_border_min.angle,new_border_min.amplitude)
+                                        raw_da_min=compute_da(border_min.angle,border_min.amplitude)
+                                        if new_da_min<raw_da_min:
+                                            print(1)
+                                            new_border_min=border_min
+                                            new_border_max=upper_davsturns.loc[rc,'border'][0]
 
                                         # Save DA
                                         lower_davsturns.loc[rc,'border']=[ new_border_min ]
