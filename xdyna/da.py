@@ -4,6 +4,7 @@ import json
 import datetime
 import time
 import tempfile
+import sys
 
 from scipy import interpolate, integrate
 from scipy.special import lambertw as W
@@ -1182,7 +1183,7 @@ class DA:
 
 
     # Not allowed on parallel process
-    def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True):
+    def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True,list_seed=None):
         '''
         Compute the DA upper and lower estimation at a specific turn in the form of a pandas table:
         ['turn','border','avg','min','max']
@@ -1215,12 +1216,17 @@ class DA:
         
         # Select data per seed if needed
         if self.meta.nseeds==0:
+            list_seed=[ 0 ]
             list_data=[ self.survival_data.copy()]
         else:
-            list_data=[ self.survival_data[self.survival_data.seed==s].copy() for s in range(1,self.meta.nseeds+1)]
+            if list_seed is None or len(list_seed)==0:
+                list_seed=[s for s in range(1,self.meta.nseeds+1)]
+            list_data=[ self.survival_data[self.survival_data.seed==s].copy() for s in list_seed ]
         
         # Run DA raw border detection
-        for seed,data in enumerate(list_data):
+        sys.stdout.write(f'seed {0:>3d}')
+        for seed,data in zip(list_seed,list_data):
+            sys.stdout.write(f'\rseed {seed:>3d}')
             data['id']= data.index
             if self.da_type == 'radial':
                 data['round_angle']= data['angle']
@@ -1352,23 +1358,24 @@ class DA:
                 self._upper_davsturns.loc[at_turn,'min'   ]=min(border_max.amplitude)
                 self._upper_davsturns.loc[at_turn,'max'   ]=max(border_max.amplitude)
             else:
-                self._lower_davsturns[seed+1].loc[at_turn,'turn'  ]=at_turn
-                self._lower_davsturns[seed+1].loc[at_turn,'border']=[ border_min ]
-                self._lower_davsturns[seed+1].loc[at_turn,'avg'   ]=compute_da(border_min.angle, border_min.amplitude)
-                self._lower_davsturns[seed+1].loc[at_turn,'min'   ]=min(border_min.amplitude)
-                self._lower_davsturns[seed+1].loc[at_turn,'max'   ]=max(border_min.amplitude)
+                self._lower_davsturns[seed].loc[at_turn,'turn'  ]=at_turn
+                self._lower_davsturns[seed].loc[at_turn,'border']=[ border_min ]
+                self._lower_davsturns[seed].loc[at_turn,'avg'   ]=compute_da(border_min.angle, border_min.amplitude)
+                self._lower_davsturns[seed].loc[at_turn,'min'   ]=min(border_min.amplitude)
+                self._lower_davsturns[seed].loc[at_turn,'max'   ]=max(border_min.amplitude)
                 
-                self._upper_davsturns[seed+1].loc[at_turn,'turn'  ]=at_turn
-                self._upper_davsturns[seed+1].loc[at_turn,'border']=[ border_max ]
-                self._upper_davsturns[seed+1].loc[at_turn,'avg'   ]=compute_da(border_max.angle, border_max.amplitude)
-                self._upper_davsturns[seed+1].loc[at_turn,'min'   ]=min(border_max.amplitude)
-                self._upper_davsturns[seed+1].loc[at_turn,'max'   ]=max(border_max.amplitude)
+                self._upper_davsturns[seed].loc[at_turn,'turn'  ]=at_turn
+                self._upper_davsturns[seed].loc[at_turn,'border']=[ border_max ]
+                self._upper_davsturns[seed].loc[at_turn,'avg'   ]=compute_da(border_max.angle, border_max.amplitude)
+                self._upper_davsturns[seed].loc[at_turn,'min'   ]=min(border_max.amplitude)
+                self._upper_davsturns[seed].loc[at_turn,'max'   ]=max(border_max.amplitude)
+        sys.stdout.write(f'\rComputing DA at turn {np.int(at_turn):d} succesfully end!\n')
         
         
         if self.meta.nseeds==0:
             return self._lower_davsturns.border,self._lower_davsturns.border
         else:
-            return self._lower_davsturns[seed+1].border,self._lower_davsturns[seed+1].border
+            return self._lower_davsturns[seed].border,self._lower_davsturns[seed].border
 
 
     
@@ -1385,8 +1392,8 @@ class DA:
           * from_turn: first turn at which this estimation must be computed (Default=1e3).
           * to_turn: last turn at which this estimation must be computed (Default=max_turns).
         '''
-        if self.meta.pairs_shift != 0:
-            raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
+#         if self.meta.pairs_shift != 0:
+#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
             
         # Initialize input and da array
         if to_turn is None:
@@ -1407,21 +1414,32 @@ class DA:
         
         # Run DA raw border detection
         if self.da_type not in ['monte_carlo', 'free']:
-            for seed,data in enumerate(list_data):
-                if self.meta.nseeds==0:
-                    lower_davsturns=self._lower_davsturns
-                    upper_davsturns=self._upper_davsturns
-                else:
-                    lower_davsturns=self._lower_davsturns[seed+1]
-                    upper_davsturns=self._upper_davsturns[seed+1]
+# #             for seed,data in enumerate(list_data):
+#             if self.meta.nseeds==0:
+#                 lower_davsturns=self._lower_davsturns
+#                 upper_davsturns=self._upper_davsturns
+#             else:
+#                 lower_davsturns=self._lower_davsturns[seed+1]
+#                 upper_davsturns=self._upper_davsturns[seed+1]
 
-                # Get list of turn to 
-                lturns=np.sort(np.unique(data.nturns))
-                lturns=lturns[(lturns>from_turn) & (lturns<to_turn)]
-                lturns=np.unique(np.append(lturns,[from_turn,to_turn]))
-                lturns=np.array([at_turn for at_turn in lturns if at_turn not in lower_davsturns])
-                for at_turn in reversed(lturns):
-                    self.calculate_da(at_turn=at_turn,angular_precision=1,smoothing=False)
+            # Get list of turn to 
+            lturns=np.sort(np.unique(self.survival_data.nturns))
+            lturns=lturns[(lturns>from_turn) & (lturns<to_turn)]
+            lturns=np.unique(np.append(lturns,[from_turn,to_turn]))
+#             lturns=np.array([at_turn for at_turn in lturns if at_turn not in lower_davsturns])
+            
+            if self.meta.nseeds==0:
+                lturns=np.array([at_turn for at_turn in lturns if at_turn not in self._lower_davsturns])
+            else:
+                lturns=np.array([at_turn for at_turn in lturns if any([at_turn not in self._lower_davsturns[seed] for seed in range(1,self.meta.nseeds+1)]) ])
+            
+            
+            for at_turn in reversed(lturns):
+                if self.meta.nseeds==0 or at_turn==from_turn or at_turn==to_turn:
+                    list_seed=None
+                else:
+                    list_seed=np.sort(np.unique(self.survival_data.loc[self.survival_data.nturns==at_turn,'seed']))
+                self.calculate_da(at_turn=at_turn,angular_precision=1,smoothing=False,list_seed=list_seed)
         else:
             for seed,data in enumerate(list_data):
                 if self.meta.nseeds==0:
@@ -1627,36 +1645,45 @@ class DA:
                     self._lower_davsturns[seed+1]=lower_davsturns
                     self._upper_davsturns[seed+1]=upper_davsturns
                     
-            # For the multiseeds case, generate the summary as 'stat' over all the seeds
-            if self.meta.nseeds!=0:
-                stat_lower_davsturns=pd.DataFrame({},index=lturns,columns=['turn','border','avg','min','max'])
-                stat_upper_davsturns=pd.DataFrame({},index=lturns,columns=['turn','border','avg','min','max'])
-                
-                # Compute the stat
-                lower_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) 
-                upper_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) 
-                for at_turn in lturns:
-                    for s in range(1,self.meta.nseeds+1):
-                        DA=self.get_lower_da(at_turn=at_turn)
-                        lower_davsturns.loc[s,'avg']=DA['avg']
-                        lower_davsturns.loc[s,'min']=DA['min']
-                        lower_davsturns.loc[s,'max']=DA['max']
-                        
-                        DA=self.get_upper_da(at_turn=at_turn)
-                        upper_davsturns.loc[s,'avg']=DA['avg']
-                        upper_davsturns.loc[s,'min']=DA['min']
-                        upper_davsturns.loc[s,'max']=DA['max']
-                        
-                    # Save stat
-                    stat_lower_davsturns.loc[at_turn,'avg']=lower_davsturns['avg'].mean()
-                    stat_lower_davsturns.loc[at_turn,'min']=lower_davsturns['min'].min()
-                    stat_lower_davsturns.loc[at_turn,'max']=lower_davsturns['max'].max()
-                    
-                    stat_upper_davsturns.loc[at_turn,'avg']=upper_davsturns['avg'].mean()
-                    stat_upper_davsturns.loc[at_turn,'min']=upper_davsturns['min'].min()
-                    stat_upper_davsturns.loc[at_turn,'max']=upper_davsturns['max'].max()
-                self._lower_davsturns['stat']=stat_lower_davsturns
-                self._upper_davsturns['stat']=stat_upper_davsturns
+        # For the multiseeds case, generate the summary as 'stat' over all the seeds
+        if self.meta.nseeds!=0:
+            stat_lower_davsturns=pd.DataFrame({},index=lturns,columns=['turn','border','avg','min','max'])
+            stat_upper_davsturns=pd.DataFrame({},index=lturns,columns=['turn','border','avg','min','max'])
+
+            # Compute the stat
+            lower_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) 
+            upper_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max'])
+            sys.stdout.write(f'Compute turn-by-turn statistic... (turn={lturns[0]:>7d}, seed={1:>3d})') 
+            for at_turn in lturns:
+                for s in range(1,self.meta.nseeds+1):
+                    sys.stdout.write(f'\rCompute turn-by-turn statistic... (turn={at_turn:>7d}, seed={s:>3d})')
+                    DA=self.get_lower_da(at_turn=at_turn,seed=s)
+                    lower_davsturns.loc[s,'avg']=DA['avg']
+                    lower_davsturns.loc[s,'min']=DA['min']
+                    lower_davsturns.loc[s,'max']=DA['max']
+
+                    DA=self.get_upper_da(at_turn=at_turn,seed=s)
+                    upper_davsturns.loc[s,'avg']=DA['avg']
+                    upper_davsturns.loc[s,'min']=DA['min']
+                    upper_davsturns.loc[s,'max']=DA['max']
+
+                # Save stat
+                stat_lower_davsturns.loc[at_turn,'turn']=at_turn
+                stat_lower_davsturns.loc[at_turn,'avg']=lower_davsturns['avg'].mean()
+#                 stat_lower_davsturns.loc[at_turn,'min']=lower_davsturns['min'].min()
+#                 stat_lower_davsturns.loc[at_turn,'max']=lower_davsturns['max'].max()
+                stat_lower_davsturns.loc[at_turn,'min']=lower_davsturns['avg'].min()
+                stat_lower_davsturns.loc[at_turn,'max']=lower_davsturns['avg'].max()
+
+                stat_upper_davsturns.loc[at_turn,'turn']=at_turn
+                stat_upper_davsturns.loc[at_turn,'avg']=upper_davsturns['avg'].mean()
+#                 stat_upper_davsturns.loc[at_turn,'min']=upper_davsturns['min'].min()
+#                 stat_upper_davsturns.loc[at_turn,'max']=upper_davsturns['max'].max()
+                stat_upper_davsturns.loc[at_turn,'min']=upper_davsturns['avg'].min()
+                stat_upper_davsturns.loc[at_turn,'max']=upper_davsturns['avg'].max()
+            sys.stdout.write(f'\rCompute turn-by-turn statistic... Done!\n')
+            self._lower_davsturns['stat']=stat_lower_davsturns
+            self._upper_davsturns['stat']=stat_upper_davsturns
                 
     # =================================================================
     # ==================== Manage tracking jobs =======================
@@ -1876,12 +1903,12 @@ class DA:
           * size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
         """
         
-        if self.meta.pairs_shift != 0:
-            raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
+#         if self.meta.pairs_shift != 0:
+#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
             
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
-        if self.meta.nseeds>0 and seed==None:
+        if self.meta.nseeds>0 and (seed==None or seed=='stat'):
             raise ValueError('For multiseed simulation, please specify a seed number.')
         # Clean kwargs and initiallize parameters
         kwargs=dict(kwargs)
@@ -1906,19 +1933,20 @@ class DA:
                 data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
                 data['amplitude']= np.abs(  data['x']+1j*data['y'])
                 
-            if csurviving:
+            if csurviving is not None and csurviving!='':
                 surv=data.loc[data['nturns']>=at_turn,:]
                 ax.scatter(surv['angle'],surv['amplitude'],color=csurviving,label="Surv.", **kwargs)
-            if closses:
+            if closses is not None and closses!='':
                 import matplotlib.pyplot as plt
                 
                 loss=data.loc[data['nturns']<at_turn,:]
-                
                 if size_scaling in ["linear","log"]:
                     if size_scaling=="linear":
                         size=(loss['nturns'].to_numpy()/at_turn) * plt.rcParams['lines.markersize']
                     elif size_scaling=="log":
+                        loss=loss.loc[loss['nturns']>0,:]
                         size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
+                        
                     ax.scatter(loss['angle'],loss['amplitude'],size**2,color=closses,label="Loss.", **kwargs)
                 else:
                     ax.scatter(loss['angle'],loss['amplitude'],color=closses,label="Loss.", **kwargs)
@@ -1931,10 +1959,10 @@ class DA:
                 data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
                 data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
                 
-            if csurviving:
+            if csurviving is not None and csurviving!='':
                 surv=data.loc[data['nturns']>=at_turn,:]
                 ax.scatter(surv['x'],surv['y'],color=csurviving,label="Surv.", **kwargs)
-            if closses:
+            if closses is not None and closses!='':
                 import matplotlib.pyplot as plt
                 
                 loss=data.loc[data['nturns']<at_turn,:]
@@ -1943,7 +1971,9 @@ class DA:
                     if size_scaling=="linear":
                         size=(loss['nturns'].to_numpy()/at_turn) * plt.rcParams['lines.markersize']
                     elif size_scaling=="log":
+                        loss=loss.loc[loss['nturns']>0,:]
                         size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
+                        
                     ax.scatter(loss['x'],loss['y'],size**2,color=closses,label="Loss.", **kwargs)
                 else:
                     ax.scatter(loss['x'],loss['y'],color=closses,label="Loss.", **kwargs)
@@ -1967,10 +1997,12 @@ class DA:
           * cupper: Color of the upper DA estimation (Default="red"). Use "" to disable.
         """
         
-        if self.meta.pairs_shift != 0:
-            raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
+#         if self.meta.pairs_shift != 0:
+#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
         if self.meta.nseeds>0 and seed==None:
             raise ValueError('For multiseed simulation, please specify a seed number.')
+        if seed=='stat':
+            raise ValueError('"stat" border is not computed yet.')
         # Clean kwargs and initiallize parameters
         kwargs=dict(kwargs)
         if 'c' in kwargs:
@@ -2000,6 +2032,7 @@ class DA:
             lower_da=self._lower_davsturns[seed]
             upper_da=self._upper_davsturns[seed]
             
+        at_turn=max(lower_da.turn[lower_da.turn<=at_turn])
 
         fit_min=polar_interpolation(lower_da.loc[at_turn,'border'][0].angle, 
                                     lower_da.loc[at_turn,'border'][0].amplitude, ang_range)
@@ -2011,22 +2044,22 @@ class DA:
         sort = np.argsort(angle)
         angle= angle[sort]; amplitude_min = amplitude_min[sort]; amplitude_max = amplitude_max[sort]
         if type_plot=="polar":
-            if clower:
+            if clower is not None and clower!='':
                 ax.plot(angle,amplitude_min,color=clower,label=label+' (min)',**kwargs)
 
-            if cupper:
+            if cupper is not None and cupper!='':
                 ax.plot(angle,amplitude_max,color=cupper,label=label+' (max)',**kwargs)
                     
             ax.set_xlabel(r'Angle [$^{\circ}$]')
             ax.set_ylabel(r'Amplitude [$\sigma$]')
                 
         elif type_plot=="cartesian":
-            if clower:
+            if clower is not None and clower!='':
                 x= amplitude_min*np.cos(angle*np.pi/180)
                 y= amplitude_min*np.sin(angle*np.pi/180)
                 ax.plot(x,y,color=clower,label=label+' (min)',**kwargs)
                     
-            if cupper:
+            if cupper is not None and cupper!='':
                 x= amplitude_max*np.cos(angle*np.pi/180)
                 y= amplitude_max*np.sin(angle*np.pi/180)
                 ax.plot(x,y,color=cupper,label=label+' (max)',**kwargs)
@@ -2038,7 +2071,7 @@ class DA:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
 
             
-    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", **kwargs):
+    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", show_seed=True, **kwargs):
         """
         Plot the DA vs turns.
         
@@ -2049,10 +2082,12 @@ class DA:
           * cupper: Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
         """
         
-        if self.meta.pairs_shift != 0:
-            raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
+#         if self.meta.pairs_shift != 0:
+#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
         if self.meta.nseeds>0 and seed==None:
             raise ValueError('For multiseed simulation, please specify the seed.')
+        if self.meta.nseeds==0 and seed=='stat':
+            raise ValueError('"stat" is only available for multiseed simulation.')
         # Clean kwargs and initiallize parameters
         kwargs=dict(kwargs)
         if 'c' in kwargs:
@@ -2087,7 +2122,7 @@ class DA:
         lturns_prev=[t-1 for t in lturns_data if t>from_turn and t<=to_turn]
                 
                 
-        if cupper:
+        if cupper is not None and cupper!='':
             # Load Data
             davsturns_avg=upper_da.loc[lturns_data,'avg'] ;
             davsturns_min=upper_da.loc[lturns_data,'min'] ;
@@ -2111,8 +2146,30 @@ class DA:
             ax.plot(lturns,y_max,ls="-", label='',   color=cupper,alpha=alpha,**kwargs);
 
             ax.fill_between(lturns,y_min, y_max,color=cupper,alpha=alpha*0.1,**kwargs)
+            
+            if seed=='stat' and show_seed:
+                for s in range(1,self.meta.nseeds+1):
+                    # Select the range of data
+                    slturns_data=np.array([t for t in self._upper_davsturns[s].turn if t>=from_turn and t<=to_turn])
+                    slturns_data=slturns_data[np.argsort(slturns_data)]
+                    slturns_prev=[t-1 for t in slturns_data if t>from_turn and t<=to_turn]
         
-        if clower:
+                    # Load Data
+                    davsturns_avg=self._upper_davsturns[s].loc[slturns_data,'avg'] ;
+
+                    # Add step at turns-1
+                    for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
+                        davsturns_avg[prev]=davsturns_avg[turn]
+
+                    lturns=np.array(davsturns_avg.index.tolist())
+                    lturns=lturns[np.argsort(lturns)]
+                    y_avg=np.array(davsturns_avg[lturns], dtype=float)
+
+                    # Plot the results
+                    ax.plot(lturns,y_avg,ls="-.",label='',color=cupper,alpha=alpha*0.3,**kwargs);
+
+        
+        if clower is not None and clower!='':
             # Load Data
             davsturns_avg=lower_da.loc[lturns_data,'avg'] ;
             davsturns_min=lower_da.loc[lturns_data,'min'] ;
@@ -2136,6 +2193,27 @@ class DA:
             ax.plot(lturns,y_max,ls="-", label='',   color=clower,alpha=alpha,**kwargs);
 
             ax.fill_between(lturns,y_min, y_max,color=clower,alpha=alpha*0.1,**kwargs)
+            
+            if seed=='stat' and show_seed:
+                for s in range(1,self.meta.nseeds+1):
+                    # Select the range of data
+                    slturns_data=np.array([t for t in self._lower_davsturns[s].turn if t>=from_turn and t<=to_turn])
+                    slturns_data=slturns_data[np.argsort(slturns_data)]
+                    slturns_prev=[t-1 for t in slturns_data if t>from_turn and t<=to_turn]
+        
+                    # Load Data
+                    davsturns_avg=self._lower_davsturns[s].loc[slturns_data,'avg'] ;
+
+                    # Add step at turns-1
+                    for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
+                        davsturns_avg[prev]=davsturns_avg[turn]
+
+                    lturns=np.array(davsturns_avg.index.tolist())
+                    lturns=lturns[np.argsort(lturns)]
+                    y_avg=np.array(davsturns_avg[lturns], dtype=float)
+
+                    # Plot the results
+                    ax.plot(lturns,y_avg,ls="-.",label='',color=clower,alpha=alpha*0.3,**kwargs);
         
         ax.set_xlabel(r'Turns [1]')
         ax.set_ylabel(r'Amplitude [$\sigma$]')
