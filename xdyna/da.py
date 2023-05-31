@@ -495,6 +495,8 @@ class DA:
         self.meta.da_type = 'grid'
         self.meta.da_dim = 2
         self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
+        self.meta.ang_min = np.min(np.angle(x+1j*y, deg=True))
+        self.meta.ang_max = np.max(np.angle(x+1j*y, deg=True))
         self.meta.npart = len(self._surv.index)
         self.meta._store()
 
@@ -564,6 +566,8 @@ class DA:
         self.meta.da_type = 'radial'
         self.meta.da_dim = 2
         self.meta.r_max = r_max
+        self.meta.ang_min = ang_min
+        self.meta.ang_max = ang_max
         self.meta.npart = len(self._surv.index)
         self.meta._store()
 
@@ -618,6 +622,8 @@ class DA:
         self.meta.da_type = 'monte_carlo'
         self.meta.da_dim = 2
         self.meta.r_max = r_max
+        self.meta.ang_min = ang_min
+        self.meta.ang_max = ang_max
         self.meta.npart = len(self._surv.index)
         self.meta._store()
 
@@ -1217,11 +1223,12 @@ class DA:
         # Select data per seed if needed
         if self.meta.nseeds==0:
             list_seed=[ 0 ]
-            list_data=[ self.survival_data.copy()]
+            list_data=[ self.survival_data.copy() ]
         else:
             if list_seed is None or len(list_seed)==0:
                 list_seed=[s for s in range(1,self.meta.nseeds+1)]
             list_data=[ self.survival_data[self.survival_data.seed==s].copy() for s in list_seed ]
+        ang_range=(self.meta.ang_min,self.meta.ang_max)
         
         # Run DA raw border detection
         sys.stdout.write(f'seed {0:>3d}')
@@ -1240,7 +1247,7 @@ class DA:
                 data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
                 data['amplitude']  = np.abs(  data['x']+1j*data['y'])
                 data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
-            ang_range=(min(data.angle),max(data.angle))
+#             ang_range=(min(data.angle),max(data.angle))
 
             # Detect range to look at the DA border
             losses =data.nturns<at_turn
@@ -1348,25 +1355,25 @@ class DA:
             if self.meta.nseeds==0:
                 self._lower_davsturns.loc[at_turn,'turn'  ]=at_turn
                 self._lower_davsturns.loc[at_turn,'border']=[ border_min ]
-                self._lower_davsturns.loc[at_turn,'avg'   ]=compute_da(border_min.angle, border_min.amplitude)
+                self._lower_davsturns.loc[at_turn,'avg'   ]=compute_da(border_min.angle, border_min.amplitude,ang_range)
                 self._lower_davsturns.loc[at_turn,'min'   ]=min(border_min.amplitude)
                 self._lower_davsturns.loc[at_turn,'max'   ]=max(border_min.amplitude)
                 
                 self._upper_davsturns.loc[at_turn,'turn'  ]=at_turn
                 self._upper_davsturns.loc[at_turn,'border']=[ border_max ]
-                self._upper_davsturns.loc[at_turn,'avg'   ]=compute_da(border_max.angle, border_max.amplitude)
+                self._upper_davsturns.loc[at_turn,'avg'   ]=compute_da(border_max.angle, border_max.amplitude,ang_range)
                 self._upper_davsturns.loc[at_turn,'min'   ]=min(border_max.amplitude)
                 self._upper_davsturns.loc[at_turn,'max'   ]=max(border_max.amplitude)
             else:
                 self._lower_davsturns[seed].loc[at_turn,'turn'  ]=at_turn
                 self._lower_davsturns[seed].loc[at_turn,'border']=[ border_min ]
-                self._lower_davsturns[seed].loc[at_turn,'avg'   ]=compute_da(border_min.angle, border_min.amplitude)
+                self._lower_davsturns[seed].loc[at_turn,'avg'   ]=compute_da(border_min.angle, border_min.amplitude,ang_range)
                 self._lower_davsturns[seed].loc[at_turn,'min'   ]=min(border_min.amplitude)
                 self._lower_davsturns[seed].loc[at_turn,'max'   ]=max(border_min.amplitude)
                 
                 self._upper_davsturns[seed].loc[at_turn,'turn'  ]=at_turn
                 self._upper_davsturns[seed].loc[at_turn,'border']=[ border_max ]
-                self._upper_davsturns[seed].loc[at_turn,'avg'   ]=compute_da(border_max.angle, border_max.amplitude)
+                self._upper_davsturns[seed].loc[at_turn,'avg'   ]=compute_da(border_max.angle, border_max.amplitude,ang_range)
                 self._upper_davsturns[seed].loc[at_turn,'min'   ]=min(border_max.amplitude)
                 self._upper_davsturns[seed].loc[at_turn,'max'   ]=max(border_max.amplitude)
         sys.stdout.write(f'\rComputing DA at turn {np.int(at_turn):d} succesfully end!\n')
@@ -1380,7 +1387,7 @@ class DA:
 
     
     # Not allowed on parallel process
-    def calculate_davsturns(self,from_turn=1e3,to_turn=None):#,nsteps=None
+    def calculate_davsturns(self,from_turn=1e3,to_turn=None, bin_size=1):#,nsteps=None
         '''
         Compute the DA upper and lower evolution from a specific turn to another in the form of a pandas table:
         ['turn','border','avg','min','max']
@@ -1390,10 +1397,9 @@ class DA:
         
         Inputs:
           * from_turn: first turn at which this estimation must be computed (Default=1e3).
-          * to_turn: last turn at which this estimation must be computed (Default=max_turns).
+          * to_turn:   last turn at which this estimation must be computed (Default=max_turns).
+          * bin_size:  the turns is slice by this number (Default=1).
         '''
-#         if self.meta.pairs_shift != 0:
-#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
             
         # Initialize input and da array
         if to_turn is None:
@@ -1408,25 +1414,17 @@ class DA:
             
         # Select data per seed if needed
         if self.meta.nseeds==0:
-            list_data=[ self.survival_data.copy()]
+            list_data=[ self.survival_data.copy() ]
         else:
-            list_data=[ self.survival_data[self.survival_data.seed==s].copy() for s in range(1,self.meta.nseeds+1)]
+            list_data=[ self.survival_data[self.survival_data.seed==s].copy() for s in range(1,self.meta.nseeds+1) ]
         
         # Run DA raw border detection
         if self.da_type not in ['monte_carlo', 'free']:
-# #             for seed,data in enumerate(list_data):
-#             if self.meta.nseeds==0:
-#                 lower_davsturns=self._lower_davsturns
-#                 upper_davsturns=self._upper_davsturns
-#             else:
-#                 lower_davsturns=self._lower_davsturns[seed+1]
-#                 upper_davsturns=self._upper_davsturns[seed+1]
 
             # Get list of turn to 
-            lturns=np.sort(np.unique(self.survival_data.nturns))
+            lturns=np.sort(np.unique(bin_size*np.floor(self.survival_data.nturns/bin_size)))
             lturns=lturns[(lturns>from_turn) & (lturns<to_turn)]
             lturns=np.unique(np.append(lturns,[from_turn,to_turn]))
-#             lturns=np.array([at_turn for at_turn in lturns if at_turn not in lower_davsturns])
             
             if self.meta.nseeds==0:
                 lturns=np.array([at_turn for at_turn in lturns if at_turn not in self._lower_davsturns])
@@ -1440,7 +1438,9 @@ class DA:
                 else:
                     list_seed=np.sort(np.unique(self.survival_data.loc[self.survival_data.nturns==at_turn,'seed']))
                 self.calculate_da(at_turn=at_turn,angular_precision=1,smoothing=False,list_seed=list_seed)
+                sys.stdout.write(f'\r')
         else:
+            ang_range=(self.meta.ang_min,self.meta.ang_max)
             for seed,data in enumerate(list_data):
                 if self.meta.nseeds==0:
                     lower_davsturns=self._lower_davsturns
@@ -1453,10 +1453,10 @@ class DA:
                 if 'angle' not in data.columns or 'amplitude' not in data.columns:
                     data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
                     data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-                ang_range=(min(data.angle),max(data.angle))
+#                 ang_range=(min(data.angle),max(data.angle))
 
                 # Get list of turn to 
-                lturns=np.sort(np.unique(data.nturns))
+                lturns=np.sort(np.unique(bin_size*np.floor(data.nturns/bin_size)))
                 lturns=lturns[(lturns>from_turn) & (lturns<to_turn)]
                 lturns=np.unique(np.append(lturns,[from_turn,to_turn]))
                 lturns=np.array([at_turn for at_turn in lturns if at_turn not in lower_davsturns])
@@ -1497,7 +1497,7 @@ class DA:
                                                                         at_turn=rc,DA_lim_min=new_DA_lim_min,
                                                                         active_warmup=False)
 
-                            new_da=compute_da(new_border_min.angle,new_border_min.amplitude)
+                            new_da=compute_da(new_border_min.angle,new_border_min.amplitude,ang_range)
                             new_DA_lim_min=min(new_border_min.amplitude)
 
                             # Check if DA decrease with the turns
@@ -1512,7 +1512,7 @@ class DA:
                             lower_davsturns.loc[rc,'max'   ]=max(border_min.amplitude)
 
                             upper_davsturns.loc[rc,'border']=[ new_border_max ]
-                            upper_davsturns.loc[rc,'avg'   ]=compute_da(new_border_max.angle,new_border_max.amplitude)
+                            upper_davsturns.loc[rc,'avg'   ]=compute_da(new_border_max.angle,new_border_max.amplitude,ang_range)
                             upper_davsturns.loc[rc,'min'   ]=min(new_border_max.amplitude)
                             upper_davsturns.loc[rc,'max'   ]=max(new_border_max.amplitude)
 
@@ -1523,7 +1523,7 @@ class DA:
                     DA_lim_min=min(raw_border_min.amplitude)
                     new_border_min,new_border_max=_da_smoothing(data,raw_border_min,raw_border_max,removed=removed,
                                                                 at_turn=at_turn,DA_lim_min=DA_lim_min,active_warmup=True)
-                    new_da=compute_da(new_border_min.angle, new_border_min.amplitude)
+                    new_da=compute_da(new_border_min.angle, new_border_min.amplitude,ang_range)
 
                     # Check if DA decrease with the turns
                     if max(new_border_max.amplitude)<DA_lim_max:
@@ -1546,7 +1546,7 @@ class DA:
 
                     upper_davsturns.loc[at_turn,'turn'  ]=at_turn
                     upper_davsturns.loc[at_turn,'border']=[ border_max ]
-                    upper_davsturns.loc[at_turn,'avg'   ]=compute_da(border_max.angle,border_max.amplitude)
+                    upper_davsturns.loc[at_turn,'avg'   ]=compute_da(border_max.angle,border_max.amplitude,ang_range)
                     upper_davsturns.loc[at_turn,'min'   ]=min(border_max.amplitude)
                     upper_davsturns.loc[at_turn,'max'   ]=DA_lim_max=max(border_max.amplitude)
                     
@@ -1578,13 +1578,13 @@ class DA:
 
                             # Save DA
                             lower_davsturns.loc[at_turn,'border']=[ new_border_min ]
-                            lower_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_min.angle, new_border_min.amplitude)
+                            lower_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_min.angle, new_border_min.amplitude,ang_range)
                             lower_davsturns.loc[at_turn,'min'   ]=min(new_border_min.amplitude)
 #                             lower_davsturns.loc[at_turn,'min'   ]=new_DA_lim_min=min(new_border_min.amplitude)
                             lower_davsturns.loc[at_turn,'max'   ]=max(new_border_min.amplitude)
 
                             upper_davsturns.loc[at_turn,'border']=[ new_border_max ]
-                            upper_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_max.angle,new_border_max.amplitude)
+                            upper_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_max.angle,new_border_max.amplitude,ang_range)
                             upper_davsturns.loc[at_turn,'min'   ]=min(new_border_max.amplitude)
                             upper_davsturns.loc[at_turn,'max'   ]=max(new_border_max.amplitude)
                             
@@ -1610,7 +1610,7 @@ class DA:
 
 
                                         # Check if DA decrease with the turns
-                                        new_da_min=compute_da(new_border_min.angle,new_border_min.amplitude)
+                                        new_da_min=compute_da(new_border_min.angle,new_border_min.amplitude,ang_range)
                                         raw_da_min=compute_da(border_min.angle,border_min.amplitude)
                                         if new_da_min<raw_da_min:
                                             print(1)
@@ -1620,13 +1620,13 @@ class DA:
                                         # Save DA
                                         lower_davsturns.loc[rc,'border']=[ new_border_min ]
                                         lower_davsturns.loc[rc,'avg'   ]=compute_da(new_border_min.angle,
-                                                                                    new_border_min.amplitude)
+                                                                                    new_border_min.amplitude,ang_range)
                                         lower_davsturns.loc[rc,'min'   ]=min(new_border_min.amplitude)
                                         lower_davsturns.loc[rc,'max'   ]=max(new_border_min.amplitude)
 
                                         upper_davsturns.loc[rc,'border']=[ new_border_max ]
                                         upper_davsturns.loc[rc,'avg'   ]=compute_da(new_border_max.angle,
-                                                                                    new_border_max.amplitude)
+                                                                                    new_border_max.amplitude,ang_range)
                                         upper_davsturns.loc[rc,'min'   ]=min(new_border_max.amplitude)
                                         upper_davsturns.loc[rc,'max'   ]=max(new_border_max.amplitude)
                                     
@@ -1653,10 +1653,10 @@ class DA:
             # Compute the stat
             lower_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max']) 
             upper_davsturns=pd.DataFrame({},index=[s for s in range(1,self.meta.nseeds+1)], columns=['avg','min','max'])
-            sys.stdout.write(f'Compute turn-by-turn statistic... (turn={lturns[0]:>7d}, seed={1:>3d})') 
+            sys.stdout.write(f'Compute turn-by-turn statistic... (turn={int(lturns[0]):>7d}, seed={1:>3d})') 
             for at_turn in lturns:
                 for s in range(1,self.meta.nseeds+1):
-                    sys.stdout.write(f'\rCompute turn-by-turn statistic... (turn={at_turn:>7d}, seed={s:>3d})')
+                    sys.stdout.write(f'\rCompute turn-by-turn statistic... (turn={int(at_turn):>7d}, seed={s:>3d})')
                     DA=self.get_lower_da(at_turn=at_turn,seed=s)
                     lower_davsturns.loc[s,'avg']=DA['avg']
                     lower_davsturns.loc[s,'min']=DA['min']
@@ -1902,9 +1902,6 @@ class DA:
           * closses: Color of losses dots (Default="red"). Use "" to disable.
           * size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
         """
-        
-#         if self.meta.pairs_shift != 0:
-#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
             
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
@@ -2071,7 +2068,8 @@ class DA:
             raise ValueError('type_plot can only be either "polar" or "cartesian".')
 
             
-    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", show_seed=True, **kwargs):
+    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", 
+                              show_seed=True, show_Nm1=True, **kwargs):
         """
         Plot the DA vs turns.
         
@@ -2080,14 +2078,15 @@ class DA:
           * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
           * clower: Color of the lower da vs turns stat. Set to '' will not show the plot (Default: "blue").
           * cupper: Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
+          * show_seed: Plot seeds (Default: True).
+          * show_Nm1: Plot davsturns as a stepwise function (Default: True).
         """
         
-#         if self.meta.pairs_shift != 0:
-#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
         if self.meta.nseeds>0 and seed==None:
             raise ValueError('For multiseed simulation, please specify the seed.')
         if self.meta.nseeds==0 and seed=='stat':
             raise ValueError('"stat" is only available for multiseed simulation.')
+            
         # Clean kwargs and initiallize parameters
         kwargs=dict(kwargs)
         if 'c' in kwargs:
@@ -2107,7 +2106,7 @@ class DA:
             to_turn=self.max_turns
             
         if self._lower_davsturns is None:
-            self.calculate_davsturns(from_turn=from_turn,to_turn=to_turn)#,nsteps=None
+            self.calculate_davsturns(from_turn=from_turn,to_turn=to_turn)
             
         if self.meta.nseeds==0:
             lower_da=self._lower_davsturns
@@ -2121,7 +2120,6 @@ class DA:
         lturns_data=lturns_data[np.argsort(lturns_data)]
         lturns_prev=[t-1 for t in lturns_data if t>from_turn and t<=to_turn]
                 
-                
         if cupper is not None and cupper!='':
             # Load Data
             davsturns_avg=upper_da.loc[lturns_data,'avg'] ;
@@ -2129,10 +2127,11 @@ class DA:
             davsturns_max=upper_da.loc[lturns_data,'max'] ;
             
             # Add step at turns-1
-            for prev,turn in zip(lturns_prev, lturns_data[0:-1]):
-                davsturns_avg[prev]=davsturns_avg[turn]
-                davsturns_min[prev]=davsturns_min[turn]
-                davsturns_max[prev]=davsturns_max[turn]
+            if show_Nm1:
+                for prev,turn in zip(lturns_prev, lturns_data[0:-1]):
+                    davsturns_avg[prev]=davsturns_avg[turn]
+                    davsturns_min[prev]=davsturns_min[turn]
+                    davsturns_max[prev]=davsturns_max[turn]
             
             lturns=np.array(davsturns_avg.index.tolist())
             lturns=lturns[np.argsort(lturns)]
@@ -2158,15 +2157,16 @@ class DA:
                     davsturns_avg=self._upper_davsturns[s].loc[slturns_data,'avg'] ;
 
                     # Add step at turns-1
-                    for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
-                        davsturns_avg[prev]=davsturns_avg[turn]
+                    if show_Nm1:
+                        for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
+                            davsturns_avg[prev]=davsturns_avg[turn]
 
                     lturns=np.array(davsturns_avg.index.tolist())
                     lturns=lturns[np.argsort(lturns)]
                     y_avg=np.array(davsturns_avg[lturns], dtype=float)
 
                     # Plot the results
-                    ax.plot(lturns,y_avg,ls="-.",label='',color=cupper,alpha=alpha*0.3,**kwargs);
+                    ax.plot(lturns,y_avg,ls="-.",lw=1,label='',color=cupper,alpha=alpha*0.3,**kwargs);
 
         
         if clower is not None and clower!='':
@@ -2176,10 +2176,11 @@ class DA:
             davsturns_max=lower_da.loc[lturns_data,'max'] ;
             
             # Add step at turns-1
-            for prev,turn in zip(lturns_prev, lturns_data[0:-1]):
-                davsturns_avg[prev]=davsturns_avg[turn]
-                davsturns_min[prev]=davsturns_min[turn]
-                davsturns_max[prev]=davsturns_max[turn]
+            if show_Nm1:
+                for prev,turn in zip(lturns_prev, lturns_data[0:-1]):
+                    davsturns_avg[prev]=davsturns_avg[turn]
+                    davsturns_min[prev]=davsturns_min[turn]
+                    davsturns_max[prev]=davsturns_max[turn]
             
             lturns=np.array(davsturns_avg.index.tolist())
             lturns=lturns[np.argsort(lturns)]
@@ -2205,15 +2206,16 @@ class DA:
                     davsturns_avg=self._lower_davsturns[s].loc[slturns_data,'avg'] ;
 
                     # Add step at turns-1
-                    for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
-                        davsturns_avg[prev]=davsturns_avg[turn]
+                    if show_Nm1:
+                        for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
+                            davsturns_avg[prev]=davsturns_avg[turn]
 
                     lturns=np.array(davsturns_avg.index.tolist())
                     lturns=lturns[np.argsort(lturns)]
                     y_avg=np.array(davsturns_avg[lturns], dtype=float)
 
                     # Plot the results
-                    ax.plot(lturns,y_avg,ls="-.",label='',color=clower,alpha=alpha*0.3,**kwargs);
+                    ax.plot(lturns,y_avg,ls="-.",lw=1,label='',color=clower,alpha=alpha*0.3,**kwargs);
         
         ax.set_xlabel(r'Turns [1]')
         ax.set_ylabel(r'Amplitude [$\sigma$]')
@@ -2290,12 +2292,34 @@ def get_da_evo_radial(files):
     
     
     
-def compute_da(x, y):
-    x=np.array(x); y=np.array(y)
-    sort=np.argsort(x)
-    domaine=integrate.trapezoid(x=x[sort]*np.pi/180, y=np.ones(x.size))
-#     return np.sqrt( 2/np.pi*integrate.trapezoid(x=x[sort]*np.pi/180, y=y[sort]**2) )
-    return np.sqrt( integrate.trapezoid(x=x[sort]*np.pi/180, y=y[sort]**2)/domaine )
+def compute_da(x, y, xrange):
+    """
+    Return the arithmetic mean using the trapezoidal rule for open border.
+    """
+    x=np.array(x); y=np.array(y); sort=np.argsort(x); 
+    x=x[sort]; y=y[sort]
+#     D=integrate.trapezoid(x=x*np.pi/180, y=np.ones(x.size))
+#     return np.sqrt( 2/np.pi*integrate.trapezoid(x=x*np.pi/180, y=y**2) )
+#     return np.sqrt( integrate.trapezoid(x=x*np.pi/180, y=y**2)/D )
+#     return integrate.trapezoid(x=x*np.pi/180, y=y)/D
+    
+    # Trapz open border
+    res =y[0]*(x[0]-xrange[0]) + y[-1]*(xrange[1]-x[-1])
+    res+= (0.5)*( ( y[1:] + y[:-1] )*(x[1:] - x[:-1]) ).sum()
+    return res/(xrange[1]-xrange[0])
+
+    
+def trapz_norm2(x, y, xrange):
+    """
+    Return the quadratic mean using the trapezoidal rule for open border.
+    """
+    x=np.array(x); y=np.array(y); sort=np.argsort(x); 
+    x=x[sort]; y=y[sort]**2
+    
+    # Trapz open border
+    res =y[0]*(x[0]-xrange[0]) + y[-1]*(xrange[1]-x[-1])
+    res+= (0.5)*( ( y[1:] + y[:-1] )*(x[1:] - x[:-1]) ).sum()
+    return np.sqrt( res/(xrange[1]-xrange[0]) )
 
 
 def polar_interpolation(DA_angle, DA_amplitude, angle_range):
@@ -2316,13 +2340,14 @@ def polar_interpolation(DA_angle, DA_amplitude, angle_range):
 
 # Not allowed on parallel process
 def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFrame(columns=['id']),
-                  DA_lim_min=None,DA_lim_max=None, active_warmup=True):
+                  DA_lim_min=None,DA_lim_max=None, active_warmup=True, ang_range=None):
     
     data['id']= data.index
     if 'angle' not in data.columns or 'amplitude' not in data.columns:
         data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
         data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-    ang_range=(min(data.angle),max(data.angle))
+    if ang_range is None:
+        ang_range=(min(data.angle),max(data.angle))
 
     # Check if raw border cross each other
     raw_fit_min=polar_interpolation(raw_border_min.angle, raw_border_min.amplitude, ang_range)
@@ -2393,8 +2418,8 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
 
         tmp_fit_min=polar_interpolation(tmp_border_min.angle, tmp_border_min.amplitude, ang_range)
         tmp_fit_max=polar_interpolation(tmp_border_max.angle, tmp_border_max.amplitude, ang_range)
-        tmp_da_min =compute_da(tmp_border_min.angle, tmp_border_min.amplitude)
-        tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude)
+        tmp_da_min =compute_da(tmp_border_min.angle, tmp_border_min.amplitude,ang_range)
+        tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude,ang_range)
 
 #             print('''
 #             # Check if surviving particles outside min DA border can be added to the border 
@@ -2473,7 +2498,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
         for idx in index:
             new_border_min=tmp_border_min.drop(index=idx)
             new_fit_min=polar_interpolation(new_border_min.angle, new_border_min.amplitude, ang_range)
-            new_da_min =compute_da(new_border_min.angle, new_border_min.amplitude)
+            new_da_min =compute_da(new_border_min.angle, new_border_min.amplitude,ang_range)
 
             surv_ex_DA = surv_in_da.loc[surv_in_da.amplitude>new_fit_min(surv_in_da.angle),:]
             loss_in_DA = loss.loc[loss.amplitude<=new_fit_min(loss.angle),:]
@@ -2494,7 +2519,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
         for idx in index:
             new_border_max=tmp_border_max.drop(index=idx)
             new_fit_max=polar_interpolation(new_border_max.angle, new_border_max.amplitude, ang_range)
-            new_da_max =compute_da(new_border_max.angle, new_border_max.amplitude)
+            new_da_max =compute_da(new_border_max.angle, new_border_max.amplitude,ang_range)
 
             surv_ex_DA = surv_in_da.loc[surv_in_da.amplitude>=new_fit_max(surv_in_da.angle),:]
             loss_in_DA = loss.loc[loss.amplitude<new_fit_max(loss.angle),:]
@@ -2503,7 +2528,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
 #                     print(f'\nRemove:\n{tmp_border_max.loc[idx,:]}\n')
                 tmp_border_max=new_border_max
                 tmp_fit_max=polar_interpolation(tmp_border_max.angle, tmp_border_max.amplitude, ang_range)
-                tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude)
+                tmp_da_max =compute_da(tmp_border_max.angle, tmp_border_max.amplitude,ang_range)
                 continue_smoothing=True
 #             tmp_border_max.reset_index(inplace=True, drop=True)
 
