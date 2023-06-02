@@ -1238,14 +1238,9 @@ class DA:
             if self.da_type == 'radial':
                 data['round_angle']= data['angle']
 
-            elif self.da_type == 'grid':
+            elif self.da_type in ['grid', 'monte_carlo', 'free']:
                 data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
-                data['amplitude']  = np.abs(  data['x']+1j*data['y'])
-                data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
-
-            elif self.da_type in ['monte_carlo', 'free']:
-                data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
-                data['amplitude']  = np.abs(  data['x']+1j*data['y'])
+                data['amplitude']  = np.sqrt(data['x']**2+data['y']**2)
                 data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
 #             ang_range=(min(data.angle),max(data.angle))
 
@@ -1452,7 +1447,7 @@ class DA:
                 data['id']= data.index
                 if 'angle' not in data.columns or 'amplitude' not in data.columns:
                     data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
-                    data['amplitude']  = np.abs(  data['x']+1j*data['y'])
+                    data['amplitude']  = np.sqrt(data['x']**2+data['y']**2)
 #                 ang_range=(min(data.angle),max(data.angle))
 
                 # Get list of turn to 
@@ -1928,7 +1923,7 @@ class DA:
         if type_plot=="polar":
             if "angle" not in data.columns or "amplitude" not in data.columns:
                 data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
-                data['amplitude']= np.abs(  data['x']+1j*data['y'])
+                data['amplitude']= np.sqrt(data['x']**2+data['y']**2)
                 
             if csurviving is not None and csurviving!='':
                 surv=data.loc[data['nturns']>=at_turn,:]
@@ -2350,7 +2345,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
     data['id']= data.index
     if 'angle' not in data.columns or 'amplitude' not in data.columns:
         data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
-        data['amplitude']  = np.abs(  data['x']+1j*data['y'])
+        data['amplitude']  = np.sqrt(data['x']**2+data['y']**2)
     if ang_range is None:
         ang_range=(min(data.angle),max(data.angle))
 
