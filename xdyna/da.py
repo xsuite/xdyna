@@ -1433,7 +1433,7 @@ class DA:
             
             
             for at_turn in reversed(lturns):
-                if self.meta.nseeds==0 or at_turn==from_turn or at_turn==to_turn:
+                if self.meta.nseeds==0 or at_turn==from_turn or at_turn==to_turn or bin_size>1:
                     list_seed=None
                 else:
                     list_seed=np.sort(np.unique(self.survival_data.loc[self.survival_data.nturns==at_turn,'seed']))
@@ -2309,33 +2309,38 @@ def compute_da(x, y, xrange):
     return res/(xrange[1]-xrange[0])
 
     
-def trapz_norm2(x, y, xrange):
-    """
-    Return the quadratic mean using the trapezoidal rule for open border.
-    """
-    x=np.array(x); y=np.array(y); sort=np.argsort(x); 
-    x=x[sort]; y=y[sort]**2
+# Just call compute_da with y=amplitude**2 instead
+# def trapz_norm2(x, y, xrange):
+#     """
+#     Return the quadratic mean using the trapezoidal rule for open border.
+#     """
+#     x=np.array(x); y=np.array(y); sort=np.argsort(x); 
+#     x=x[sort]; y=y[sort]**2
     
-    # Trapz open border
-    res =y[0]*(x[0]-xrange[0]) + y[-1]*(xrange[1]-x[-1])
-    res+= (0.5)*( ( y[1:] + y[:-1] )*(x[1:] - x[:-1]) ).sum()
-    return np.sqrt( res/(xrange[1]-xrange[0]) )
+#     # Trapz open border
+#     res =y[0]*(x[0]-xrange[0]) + y[-1]*(xrange[1]-x[-1])
+#     res+= (0.5)*( ( y[1:] + y[:-1] )*(x[1:] - x[:-1]) ).sum()
+#     return np.sqrt( res/(xrange[1]-xrange[0]) )
 
 
-def polar_interpolation(DA_angle, DA_amplitude, angle_range):
-    ang_min=min([angle_range[0],min(DA_angle)]) ; ang_max=max([angle_range[1],max(DA_angle)])
+def polar_interpolation(x, y, xrange):
+    """
+    Return a 1D fit function f(angle) with 'angle' in [deg].
+    """
+    xmin=min([xrange[0],min(x)]); xmax=max([xrange[1],max(x)])
     
-    DA_angle=np.array(DA_angle); DA_amplitude=np.array(DA_amplitude)
+    x=np.array(x); y=np.array(y); sort=np.argsort(x)
+    x=x[sort]; y=y[sort]; 
     
-    sort =np.argsort(DA_angle)
-    angle=DA_angle[sort]; radius=DA_amplitude[sort]; 
-    if ang_min<-170 and ang_max>170:
-        angle=np.append([-180],angle); radius=np.append([radius[0]],radius)
-        angle=np.append(angle,[ 180]); radius=np.append(radius,[radius[0]])
+    # Increase the range of the fitting in order to prevent errors
+    if xmin<-135 and xmax>135:
+        ymid=((y[0]-y[-1])*(180-x[-1]))/((x[0]+360-x[-1]))+y[-1]
+        x=np.append([-180],x); y=np.append([ymid],y)
+        x=np.append(x,[ 180]); y=np.append(y,[ymid])
     else:
-        angle=np.append([np.floor(ang_min)-5],angle); radius=np.append([radius[0]],radius)
-        angle=np.append(angle,[np.ceil(ang_max)+5]);  radius=np.append(radius,[radius[-1]])
-    return interpolate.interp1d(angle, radius)
+        x=np.append([np.floor(xmin)-5],x); y=np.append([y[0]],y)
+        x=np.append(x,[np.ceil(xmax)+5]);  y=np.append(y,[y[-1]])
+    return interpolate.interp1d(x, y)
 
 
 # Not allowed on parallel process
