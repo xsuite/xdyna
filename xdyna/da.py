@@ -495,17 +495,17 @@ class DA:
         self.meta.da_type = 'grid'
         self.meta.da_dim = 2
         self.meta.r_max = np.max(np.sqrt(x**2 + y**2))
-        self.meta.ang_min = np.min(np.angle(x+1j*y, deg=True))
-        self.meta.ang_max = np.max(np.angle(x+1j*y, deg=True))
+        self.meta.ang_min = np.min(np.arctan2(y,x)*180/np.pi)
+        self.meta.ang_max = np.max(np.arctan2(y,x)*180/np.pi)
         self.meta.npart = len(self._surv.index)
         self.meta._store()
 
 
 
     # Not allowed on parallel process
-    def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=None, ang_max=None,
+    def generate_initial_radial(self, *, angles, r_min, r_max, r_step=None, r_num=None, ang_min=0, ang_max=90,
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
-                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+                                normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None, open_border=True):
         """Generate the initial conditions in a 2D polar grid.
         """
 
@@ -521,14 +521,8 @@ class DA:
             r_max = r_min + (r_num-1) * r_step
         r = np.linspace(r_min, r_max, r_num )
         # Make the grid in angles
-        if ang_min is None and ang_max is None:
-            ang_step = 90. / (angles+1)
-            ang = np.linspace(ang_step, 90-ang_step, angles )
-        else:
-            ang_min = 0 if ang_min is None else ang_min
-            ang_max = 90 if ang_max is None else ang_max
-            ang_step = (ang_max-ang_min) / (angles+1)
-            ang = np.linspace(ang_min, ang_max, angles )
+        ang_step = (ang_max-ang_min) / (angles+1)
+        ang = np.linspace(ang_step*open_border, 90-ang_step*open_border, angles )
         # Make all combinations
         if self.meta.nseeds > 0:
             seeds = np.arange(1,self.meta.nseeds+1)
@@ -574,8 +568,8 @@ class DA:
 
 
     # Not allowed on parallel process
-    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=None,
-                                ang_max=None, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
+    def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=0,
+                                ang_max=90, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
         """
 
@@ -583,8 +577,8 @@ class DA:
 
         # Make the data
         rng = default_rng()
-        ang_min = 0 if ang_min is None else ang_min
-        ang_max = 90 if ang_max is None else ang_max
+#         ang_min = 0 if ang_min is None else ang_min
+#         ang_max = 90 if ang_max is None else ang_max
         if self.meta.nseeds > 0:
             r = rng.uniform(low=0, high=r_max**2, size=num_part*self.meta.nseeds)
             th = rng.uniform(low=ang_min, high=ang_max*np.pi/180, size=num_part*self.meta.nseeds)
@@ -1189,7 +1183,8 @@ class DA:
 
 
     # Not allowed on parallel process
-    def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True,list_seed=None):
+    def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True,list_seed=None,
+                     interp_order='1D',interp_method='trapz'):
         '''
         Compute the DA upper and lower estimation at a specific turn in the form of a pandas table:
         ['turn','border','avg','min','max']
@@ -1201,12 +1196,32 @@ class DA:
           * at_turn: turn at which this estimation must be computed (Default=max_turns).
           * angular_precision: angular precision in [deg.] for the raw estimation of the borders (Default=10). It is better to use high value in order to minimise the risk of catching stability island.
           * smoothing: True in order to smooth the borders for the random particle distribution (Default=True).
+          * interp_order:  interpolation order for the DA average: '1D', '2D', '4D' (Default='1D').
+          * interp_method: interpolation method for the DA average: 'trapz', 'simpson', 'alternative_simpson' (Default='1D').
           
         Warning: The borders might change after using calculate_davsturns as it imposes turn-by-turn monoticity.
         '''
         
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
+            
+        if interp_order=='1D':
+            compute_da=compute_da_1D
+        elif interp_order=='2D':
+            compute_da=compute_da_2D
+        elif interp_order=='4D':
+            compute_da=compute_da_4D
+        else:
+            raise ValueError("interp_order must be either: '1D', '2D' or '4D'!")
+            
+        if interp_method=='trapz':
+            interp=trapz
+        elif interp_method=='simpson':
+            interp=simpson
+        elif interp_method=='alternative_simpson':
+            interp=alter_simpson
+        else:
+            raise ValueError("interp_method must be either: 'trapz', 'simpson', 'alternative_simpson'!")
         
         # Initialize input and da array
         if at_turn is None:
@@ -1239,7 +1254,7 @@ class DA:
                 data['round_angle']= data['angle']
 
             elif self.da_type in ['grid', 'monte_carlo', 'free']:
-                data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
+                data['angle']      = np.arctan2(data['y'],data['x'])*180/np.pi
                 data['amplitude']  = np.sqrt(data['x']**2+data['y']**2)
                 data['round_angle']= np.floor(data['angle']/angular_precision)*angular_precision
 #             ang_range=(min(data.angle),max(data.angle))
@@ -1382,7 +1397,7 @@ class DA:
 
     
     # Not allowed on parallel process
-    def calculate_davsturns(self,from_turn=1e3,to_turn=None, bin_size=1):#,nsteps=None
+    def calculate_davsturns(self,from_turn=1e3,to_turn=None, bin_size=1, interp_order='1D', interp_method='trapz'):#,nsteps=None
         '''
         Compute the DA upper and lower evolution from a specific turn to another in the form of a pandas table:
         ['turn','border','avg','min','max']
@@ -1391,20 +1406,36 @@ class DA:
         {seed:['turn','border','avg','min','max'],'stat':['turn','avg','min','max']}
         
         Inputs:
-          * from_turn: first turn at which this estimation must be computed (Default=1e3).
-          * to_turn:   last turn at which this estimation must be computed (Default=max_turns).
-          * bin_size:  the turns is slice by this number (Default=1).
+          * from_turn:     first turn at which this estimation must be computed (Default=1e3).
+          * to_turn:       last turn at which this estimation must be computed (Default=max_turns).
+          * bin_size:      the turns is slice by this number (Default=1).
+          * interp_order:  interpolation order for the DA average: '1D', '2D', '4D' (Default='1D').
+          * interp_method: interpolation method for the DA average: 'trapz', 'simpson', 'alternative_simpson' (Default='1D').
         '''
             
         # Initialize input and da array
         if to_turn is None:
             to_turn=self.max_turns
             
-        if self._lower_davsturns is None or self._upper_davsturns is None:
-            self.calculate_da(at_turn=to_turn,smoothing=True)
-        elif self.meta.nseeds==0 and to_turn not in self._lower_davsturns:
-            self.calculate_da(at_turn=to_turn,smoothing=True)
-        elif self.meta.nseeds>0 and to_turn not in self._lower_davsturns[1]:
+        if interp_order=='1D':
+            compute_da=compute_da_1D
+        elif interp_order=='2D':
+            compute_da=compute_da_2D
+        elif interp_order=='4D':
+            compute_da=compute_da_3D
+        else:
+            raise ValueError("interp_order must be either: '1D', '2D' or '4D'!")
+            
+        if interp_method=='trapz':
+            interp=trapz
+        elif interp_method=='simpson':
+            interp=simpson
+        elif interp_method=='alternative_simpson':
+            interp=alter_simpson
+        else:
+            raise ValueError("interp_method must be either: 'trapz', 'simpson', 'alternative_simpson'!")
+            
+        if self._lower_davsturns is None or (self.meta.nseeds==0 and to_turn not in self._lower_davsturns)or  (self.meta.nseeds>0 and to_turn not in self._lower_davsturns[1]):
             self.calculate_da(at_turn=to_turn,smoothing=True)
             
         # Select data per seed if needed
@@ -1446,7 +1477,7 @@ class DA:
 
                 data['id']= data.index
                 if 'angle' not in data.columns or 'amplitude' not in data.columns:
-                    data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
+                    data['angle']      = np.arctan2(data['y'],data['x'])*180/np.pi
                     data['amplitude']  = np.sqrt(data['x']**2+data['y']**2)
 #                 ang_range=(min(data.angle),max(data.angle))
 
@@ -1502,13 +1533,14 @@ class DA:
 
                             # Save DA
                             lower_davsturns.loc[rc,'border']=[ border_min ]
-                            lower_davsturns.loc[rc,'avg'   ]=da
+                            lower_davsturns.loc[rc,'avg'   ]=compute_da(border_min.angle,
+                                                                        border_min.amplitude,ang_range,interp)
                             lower_davsturns.loc[rc,'min'   ]=new_DA_lim_min
                             lower_davsturns.loc[rc,'max'   ]=max(border_min.amplitude)
 
                             upper_davsturns.loc[rc,'border']=[ new_border_max ]
-                            upper_davsturns.loc[rc,'avg'   ]=compute_da_1D(new_border_max.angle,
-                                                                           new_border_max.amplitude,ang_range)
+                            upper_davsturns.loc[rc,'avg'   ]=compute_da(new_border_max.angle,
+                                                                        new_border_max.amplitude,ang_range,interp)
                             upper_davsturns.loc[rc,'min'   ]=min(new_border_max.amplitude)
                             upper_davsturns.loc[rc,'max'   ]=max(new_border_max.amplitude)
 
@@ -1535,14 +1567,14 @@ class DA:
                     # Save DA
                     lower_davsturns.loc[at_turn,'turn'  ]=at_turn
                     lower_davsturns.loc[at_turn,'border']=[ border_min ]
-                    lower_davsturns.loc[at_turn,'avg'   ]=da
+                    lower_davsturns.loc[at_turn,'avg'   ]=compute_da(border_min.angle,border_min.amplitude,ang_range,interp)
                     lower_davsturns.loc[at_turn,'min'   ]=min(border_min.amplitude)
 #                     lower_davsturns.loc[at_turn,'min'   ]=new_DA_lim_min=min(border_min.amplitude)
                     lower_davsturns.loc[at_turn,'max'   ]=max(border_min.amplitude)
 
                     upper_davsturns.loc[at_turn,'turn'  ]=at_turn
                     upper_davsturns.loc[at_turn,'border']=[ border_max ]
-                    upper_davsturns.loc[at_turn,'avg'   ]=compute_da_1D(border_max.angle,border_max.amplitude,ang_range)
+                    upper_davsturns.loc[at_turn,'avg'   ]=compute_da(border_max.angle,border_max.amplitude,ang_range,interp)
                     upper_davsturns.loc[at_turn,'min'   ]=min(border_max.amplitude)
                     upper_davsturns.loc[at_turn,'max'   ]=DA_lim_max=max(border_max.amplitude)
                     
@@ -1574,15 +1606,15 @@ class DA:
 
                             # Save DA
                             lower_davsturns.loc[at_turn,'border']=[ new_border_min ]
-                            lower_davsturns.loc[at_turn,'avg'   ]=compute_da_1D(new_border_min.angle,
-                                                                                new_border_min.amplitude,ang_range)
+                            lower_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_min.angle,
+                                                                             new_border_min.amplitude,ang_range,interp)
                             lower_davsturns.loc[at_turn,'min'   ]=min(new_border_min.amplitude)
 #                             lower_davsturns.loc[at_turn,'min'   ]=new_DA_lim_min=min(new_border_min.amplitude)
                             lower_davsturns.loc[at_turn,'max'   ]=max(new_border_min.amplitude)
 
                             upper_davsturns.loc[at_turn,'border']=[ new_border_max ]
-                            upper_davsturns.loc[at_turn,'avg'   ]=compute_da_1D(new_border_max.angle,
-                                                                                new_border_max.amplitude,ang_range)
+                            upper_davsturns.loc[at_turn,'avg'   ]=compute_da(new_border_max.angle,
+                                                                             new_border_max.amplitude,ang_range,interp)
                             upper_davsturns.loc[at_turn,'min'   ]=min(new_border_max.amplitude)
                             upper_davsturns.loc[at_turn,'max'   ]=max(new_border_max.amplitude)
                             
@@ -1617,14 +1649,14 @@ class DA:
 
                                         # Save DA
                                         lower_davsturns.loc[rc,'border']=[ new_border_min ]
-                                        lower_davsturns.loc[rc,'avg'   ]=compute_da_1D(new_border_min.angle,
-                                                                                       new_border_min.amplitude,ang_range)
+                                        lower_davsturns.loc[rc,'avg'   ]=compute_da(new_border_min.angle,
+                                                                                    new_border_min.amplitude,ang_range,interp)
                                         lower_davsturns.loc[rc,'min'   ]=min(new_border_min.amplitude)
                                         lower_davsturns.loc[rc,'max'   ]=max(new_border_min.amplitude)
 
                                         upper_davsturns.loc[rc,'border']=[ new_border_max ]
-                                        upper_davsturns.loc[rc,'avg'   ]=compute_da_1D(new_border_max.angle,
-                                                                                       new_border_max.amplitude,ang_range)
+                                        upper_davsturns.loc[rc,'avg'   ]=compute_da(new_border_max.angle,
+                                                                                    new_border_max.amplitude,ang_range,interp)
                                         upper_davsturns.loc[rc,'min'   ]=min(new_border_max.amplitude)
                                         upper_davsturns.loc[rc,'max'   ]=max(new_border_max.amplitude)
                                     
@@ -1925,7 +1957,7 @@ class DA:
             
         if type_plot=="polar":
             if "angle" not in data.columns or "amplitude" not in data.columns:
-                data['angle']    = np.angle(data['x']+1j*data['y'], deg=True)
+                data['angle']    = np.arctan2(data['y'],data['x'])*180/np.pi
                 data['amplitude']= np.sqrt(data['x']**2+data['y']**2)
                 
             if csurviving is not None and csurviving!='':
@@ -2015,7 +2047,7 @@ class DA:
             self.calculate_da(at_turn=at_turn,angular_precision=1,smoothing=True)
     
         if "angle" not in self.survival_data.columns:
-            angle= np.angle(self.survival_data['x']+1j*self.survival_data['y'], deg=True)
+            angle= np.arctan2(self.survival_data['y'],self.survival_data['x'])*180/np.pi
         else:
             angle= np.array(self.survival_data.angle)
         ang_range=(min(angle),max(angle))
@@ -2399,7 +2431,7 @@ def compute_da_4D(x, y, xrange, interp=trapz):
     """
     Return the 4D average. Default interpolator: trapz.
     """
-    return interp(x, (y**4)*np.sin(np.pi*x/90), xrange)
+    return interp(x, (y**4)*np.sin(np.pi*x/90), xrange)**(1/4)
 # --------------------------------------------------------
     
     
@@ -2437,7 +2469,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
     
     data['id']= data.index
     if 'angle' not in data.columns or 'amplitude' not in data.columns:
-        data['angle']      = np.angle(data['x']+1j*data['y'], deg=True)
+        data['angle']      = np.arctan2(data['y'],data['x'])*180/np.pi
         data['amplitude']  = np.sqrt(data['x']**2+data['y']**2)
     if ang_range is None:
         ang_range=(min(data.angle),max(data.angle))
