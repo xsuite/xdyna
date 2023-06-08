@@ -383,9 +383,19 @@ class DA:
     def set_coordinates(self, *,
                         x=None, px=None, y=None, py=None, zeta=None, delta=None,
                         normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
-        """
-        Let user provide initial coordinates for each plane.
-        """
+        """Let user provide initial coordinates for each plane.
+    
+    Parameters
+    ----------
+    x:               Horizontal normalised position in [sigma]. 
+    px:              Horizontal normalised momentum. 
+    y:               Vertical normalised position in [sigma]. 
+    py:              Vertical normalised momentum. 
+    zeta:            Longitudinal phase. 
+    delta:           Longitudinal momentum. 
+    pairs_shift:     Activate pair simulation (Default=0). 
+    pairs_shift_var: Direction in which pair particles are shifted (Default=None).
+"""
 
         self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
@@ -439,7 +449,24 @@ class DA:
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D X-Y grid.
-        """
+    
+    Parameters
+    ----------
+    x_min:           Min range in the x-plan in [sigma]. 
+    x_max:           Max range in the x-plan in [sigma]. 
+    x_step:          Amplitude step size in the x-plan in [sigma] (Default=None).
+    x_num:           Number of step in the x-plan in amplitude (Default=None). 
+    y_min:           Min range in the y-plan in [sigma]. 
+    y_max:           Max range in the y-plan in [sigma]. 
+    y_step:          Amplitude step size in the y-plan in [sigma] (Default=None).
+    y_num:           Number of step in the y-plan in amplitude (Default=None). 
+    px_norm:         Horizontal normalised momentum (Default=0). 
+    py_norm:         Vertical normalised momentum (Default=0). 
+    zeta:            Longitudinal phase (Default=0). 
+    delta:           Longitudinal momentum (Default=0.00027). 
+    pairs_shift:     Activate pair simulation (Default=0). 
+    pairs_shift_var: Direction in which pair particle are shifted (Default=None).
+"""
 
         self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
@@ -507,7 +534,24 @@ class DA:
                                 px_norm=0, py_norm=0, zeta=0, delta=0.00027,
                                 normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None, open_border=True):
         """Generate the initial conditions in a 2D polar grid.
-        """
+    
+    Parameters
+    ----------
+    angles:          Number of angles per seed.
+    r_min:           Min range of amplitude in [sigma]. 
+    r_max:           Max range of amplitude in [sigma]. 
+    r_step:          Amplitude step size in [sigma] (Default=None).
+    r_num:           Number of step in amplitude (Default=None). 
+    ang_min:         Lower range of the angulare distribution in [deg] (Default=0).
+    ang_max:         Upper range of the angulare distribution in [deg] (Default=90). 
+    px_norm:         Horizontal normalised momentum (Default=0). 
+    py_norm:         Vertical normalised momentum (Default=0). 
+    zeta:            Longitudinal phase (Default=0). 
+    delta:           Longitudinal momentum (Default=0.00027). 
+    pairs_shift:     Activate pair simulation (Default=0). 
+    pairs_shift_var: Direction in which pair particle are shifted (Default=None).
+    open_border:     If True, the 1st and last angles will be ang_min+ang_step and ang_max-ang_step respectively (Default=True).
+"""
 
         self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
@@ -522,7 +566,7 @@ class DA:
         r = np.linspace(r_min, r_max, r_num )
         # Make the grid in angles
         ang_step = (ang_max-ang_min) / (angles+1)
-        ang = np.linspace(ang_step*open_border, 90-ang_step*open_border, angles )
+        ang = np.linspace(ang_min+ang_step*open_border, ang_max-ang_step*open_border, angles )
         # Make all combinations
         if self.meta.nseeds > 0:
             seeds = np.arange(1,self.meta.nseeds+1)
@@ -571,7 +615,20 @@ class DA:
     def generate_random_initial(self, *, num_part=1000, r_max=25, px_norm=0, py_norm=0, zeta=0, delta=0.00027, ang_min=0,
                                 ang_max=90, normalised_emittance=None, nseeds=None, pairs_shift=0, pairs_shift_var=None):
         """Generate the initial conditions in a 2D random grid.
-        """
+    
+    Parameters
+    ----------
+    num_part:        Number of particle per seed (Default=1000).
+    r_max:           Max range of amplitude (Default=25). 
+    ang_min:         Lower range of the angulare distribution in [deg] (Default=0).
+    ang_max:         Upper range of the angulare distribution in [deg] (Default=90). 
+    px_norm:         Horizontal normalised momentum (Default=0). 
+    py_norm:         Vertical normalised momentum (Default=0). 
+    zeta:            Longitudinal phase (Default=0). 
+    delta:           Longitudinal momentum (Default=0.00027). 
+    pairs_shift:     Activate pair simulation (Default=0). 
+    pairs_shift_var: Direction in which pair particle are shifted (Default=None).
+"""
 
         self._prepare_generation(normalised_emittance, nseeds, pairs_shift, pairs_shift_var)
 
@@ -1134,14 +1191,14 @@ class DA:
 
     # Not allowed on parallel process
     def get_lower_da(self,at_turn=None,seed=None):
-        '''
-        Return the DA lower estimation at a specific turn in the form of a DataFrame with the following columns:
+        '''Return the DA lower estimation at a specific turn in the form of a DataFrame with the following columns:
         ['turn','border','avg','min','max']
-        
-        Inputs:
-          * at_turn: turn at which this estimation must be computed (Default=max_turns).
-          * seed: for multiseed simulation, the seed must be specified (Default=None).
-        '''
+    
+    Parameters
+    ----------
+    at_turn: Turn at which this estimation must be computed (Default=max_turns).
+    seed:    For multiseed simulation, the seed must be specified (Default=None).
+'''
           
         if at_turn is None:
             at_turn=self.max_turns
@@ -1159,14 +1216,14 @@ class DA:
 
     # Not allowed on parallel process
     def get_upper_da(self,at_turn=None,seed=None):
-        '''
-        Return the DA upper estimation at a turn in the form of a DataFrame with the following columns:
+        '''Return the DA upper estimation at a turn in the form of a DataFrame with the following columns:
         ['turn','border','avg','min','max']
-        
-        Inputs:
-          * at_turn: turn at which this estimation must be computed (Default=max_turns).
-          * seed: for multiseed simulation, the seed must be specified (Default=None).
-        '''
+    
+    Parameters
+    ----------
+    at_turn: Turn at which this estimation must be computed (Default=max_turns).
+    seed:    For multiseed simulation, the seed must be specified (Default=None).
+'''
           
         if at_turn is None:
             at_turn=self.max_turns
@@ -1185,22 +1242,24 @@ class DA:
     # Not allowed on parallel process
     def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True,list_seed=None,
                      interp_order='1D',interp_method='trapz'):
-        '''
-        Compute the DA upper and lower estimation at a specific turn in the form of a pandas table:
-        ['turn','border','avg','min','max']
+        '''Compute the DA upper and lower estimation at a specific turn in the form of a pandas table:
+    ['turn','border','avg','min','max']
         
-        or for multiseeds:
-        {seed:['turn','border','avg','min','max'],'stat':['turn','avg','min','max']}
-        
-        Inputs:
-          * at_turn: turn at which this estimation must be computed (Default=max_turns).
-          * angular_precision: angular precision in [deg.] for the raw estimation of the borders (Default=10). It is better to use high value in order to minimise the risk of catching stability island.
-          * smoothing: True in order to smooth the borders for the random particle distribution (Default=True).
-          * interp_order:  interpolation order for the DA average: '1D', '2D', '4D' (Default='1D').
-          * interp_method: interpolation method for the DA average: 'trapz', 'simpson', 'alternative_simpson' (Default='1D').
+or for multiseeds:
+    { seed:['turn','border','avg','min','max'], 'stat':['turn','avg','min','max'] }
+    
+    Parameters
+    ----------
+    at_turn:           Turn at which this estimation must be computed (Default=max_turns).
+    angular_precision: Angular precision in [deg.] for the raw estimation of the borders (Default=10). It is better to use high value in order to minimise the risk of catching stability island.
+    smoothing:         True in order to smooth the borders for the random particle distribution (Default=True).
+    interp_order:      Interpolation order for the DA average: '1D', '2D', '4D' (Default='1D').
+    interp_method:     Interpolation method for the DA average: 'trapz', 'simpson', 'alternative_simpson' (Default='1D').
           
-        Warning: The borders might change after using calculate_davsturns as it imposes turn-by-turn monoticity.
-        '''
+    Warning
+    ----------
+    The borders might change after using calculate_davsturns as it imposes turn-by-turn monoticity.
+'''
         
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
@@ -1398,20 +1457,21 @@ class DA:
     
     # Not allowed on parallel process
     def calculate_davsturns(self,from_turn=1e3,to_turn=None, bin_size=1, interp_order='1D', interp_method='trapz'):#,nsteps=None
-        '''
-        Compute the DA upper and lower evolution from a specific turn to another in the form of a pandas table:
-        ['turn','border','avg','min','max']
+        '''Compute the DA upper and lower evolution from a specific turn to another in the form of a pandas table:
+    ['turn','border','avg','min','max']
+    
+or for multiseeds:
+    { seed:['turn','border','avg','min','max'],  'stat':['turn','avg','min','max'] }
         
-        or for multiseeds:
-        {seed:['turn','border','avg','min','max'],'stat':['turn','avg','min','max']}
-        
-        Inputs:
-          * from_turn:     first turn at which this estimation must be computed (Default=1e3).
-          * to_turn:       last turn at which this estimation must be computed (Default=max_turns).
-          * bin_size:      the turns is slice by this number (Default=1).
-          * interp_order:  interpolation order for the DA average: '1D', '2D', '4D' (Default='1D').
-          * interp_method: interpolation method for the DA average: 'trapz', 'simpson', 'alternative_simpson' (Default='1D').
-        '''
+    
+    Parameters
+    ----------
+    from_turn:     First turn at which this estimation must be computed (Default=1e3).
+    to_turn:       Last turn at which this estimation must be computed (Default=max_turns).
+    bin_size:      The turns is slice by this number (Default=1).
+    interp_order:  Interpolation order for the DA average: '1D', '2D', '4D' (Default='1D').
+    interp_method: Interpolation method for the DA average: 'trapz', 'simpson', 'alternative_simpson' (Default='1D').
+'''
             
         # Initialize input and da array
         if to_turn is None:
@@ -1625,7 +1685,6 @@ class DA:
                             DA_lim_min=prev_DA_lim_min
                             border_min=new_border_min
                             if any(lower_davsturns.loc[lturns[:idx-1],'min']<DA_lim_min):
-#                                 print('Check 1')
                                 for rc in reversed(lturns[:idx-1]):
                                     if lower_davsturns.loc[rc,'min']<DA_lim_min:
                                         raw_border_min=border_min #lower_davsturns.loc[rc,'border'][0]
@@ -1921,17 +1980,18 @@ class DA:
 
     def plot_particles(self,ax, at_turn=None, type_plot="polar", seed=None,
                        closses="red", csurviving="blue", size_scaling="log", **kwargs):
-        """
-        Scatter plot of the lost and surviving particles.
-        
-        Inputs:
-          * at_turn: all particles surviving at least this number of turns are considered as surviving.
-          * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
-          * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
-          * csurviving: Color of surviving dots (Default="blue"). Use "" to disable.
-          * closses: Color of losses dots (Default="red"). Use "" to disable.
-          * size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
-        """
+        """Scatter plot of the lost and surviving particles.
+    
+    Parameters
+    ----------
+    ax:           Plot axis.
+    at_turn:      All particles surviving at least this number of turns are considered as surviving.
+    seed:         In case of multiseed simulation, the seed number must be specified (Default=None).
+    type_plot:    x-y for cartesian, ang-amp for polar (Default="polar").
+    csurviving:   Color of surviving dots (Default="blue"). Use "" to disable.
+    closses:      Color of losses dots (Default="red"). Use "" to disable.
+    size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
+"""
             
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
@@ -2013,16 +2073,17 @@ class DA:
 
             
     def plot_da_border(self,ax, at_turn=None, seed=None, type_plot="polar", clower="blue", cupper="red", **kwargs):
-        """
-        Plot the DA border.
-        
-        Inputs:
-          * at_turn: all particles surviving at least this number of turns are considered as surviving.
-          * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
-          * type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
-          * clower: Color of the lower DA estimation (Default="blue"). Use "" to disable.
-          * cupper: Color of the upper DA estimation (Default="red"). Use "" to disable.
-        """
+        """Plot the DA border.
+    
+    Parameters
+    ----------
+    ax:        Plot axis.
+    at_turn:   All particles surviving at least this number of turns are considered as surviving.
+    seed:      In case of multiseed simulation, the seed number must be specified (Default=None).
+    type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
+    clower:    Color of the lower DA estimation (Default="blue"). Use "" to disable.
+    cupper:    Color of the upper DA estimation (Default="red"). Use "" to disable.
+"""
         
 #         if self.meta.pairs_shift != 0:
 #             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
@@ -2100,17 +2161,19 @@ class DA:
             
     def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", 
                               show_seed=True, show_Nm1=True, **kwargs):
-        """
-        Plot the DA vs turns.
-        
-        Inputs:
-          * from_turn,at_turn: plot da vs turn from 'from_turn' to 'at_turn' turns (Default: from_turn=1e3, at_turn=max_turns).
-          * seed: in case of multiseed simulation, the seed number must be specified (Default=None).
-          * clower: Color of the lower da vs turns stat. Set to '' will not show the plot (Default: "blue").
-          * cupper: Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
-          * show_seed: Plot seeds (Default: True).
-          * show_Nm1: Plot davsturns as a stepwise function (Default: True).
-        """
+        """Plot the DA as a function of turns.
+    
+    Parameters
+    ----------
+    ax:        Plot axis.
+    from_turn: Lower turn range (Default: from_turn=1e3).
+    at_turn:   Upper turn range (Default: at_turn=max_turns).
+    seed:      In case of multiseed simulation, the seed number must be specified (Default=None).
+    clower:    Color of the lower da vs turns stat. Set to '' will not show the plot (Default: "blue").
+    cupper:    Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
+    show_seed: Plot seeds (Default: True).
+    show_Nm1:  Plot davsturns as a stepwise function (Default: True).
+"""
         
         if self.meta.nseeds>0 and seed==None:
             raise ValueError('For multiseed simulation, please specify the seed.')
@@ -2628,7 +2691,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
             surv_ex_DA = surv_in_da.loc[surv_in_da.amplitude>new_fit_min(surv_in_da.angle),:]
             loss_in_DA = loss.loc[loss.amplitude<=new_fit_min(loss.angle),:]
 
-            if loss_in_DA.empty and surv_ex_DA.empty and new_da_min>tmp_da_min and len(new_border_min)>2:
+            if loss_in_DA.empty and surv_ex_DA.empty and new_da_min>tmp_da_min and len(new_border_min)>3:
 #                     print(f'\nRemove:\n{tmp_border_min.loc[idx,:]}\n')
                 tmp_border_min=new_border_min
                 tmp_fit_min=fit_DA(tmp_border_min.angle, tmp_border_min.amplitude, ang_range)
@@ -2649,7 +2712,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
             surv_ex_DA = surv_in_da.loc[surv_in_da.amplitude>=new_fit_max(surv_in_da.angle),:]
             loss_in_DA = loss.loc[loss.amplitude<new_fit_max(loss.angle),:]
 
-            if loss_in_DA.empty and surv_ex_DA.empty and new_da_max<tmp_da_max and len(new_border_max)>2:
+            if loss_in_DA.empty and surv_ex_DA.empty and new_da_max<tmp_da_max and len(new_border_max)>3:
 #                     print(f'\nRemove:\n{tmp_border_max.loc[idx,:]}\n')
                 tmp_border_max=new_border_max
                 tmp_fit_max=fit_DA(tmp_border_max.angle, tmp_border_max.amplitude, ang_range)

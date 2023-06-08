@@ -61,7 +61,7 @@ def test_radial_grid():
                use_files=False)
     DA.generate_initial_radial(
         r_min=0, r_max=2, r_step=2,
-        ang_min=0, ang_max=90, angles=2,
+        ang_min=0, ang_max=90, angles=2, open_border=False
     )
     assert_frame_equal(DA.survival_data[['amplitude', 'angle']],
                        pd.DataFrame(data={'amplitude':[0.,2.,0.,2.], 'angle':[0.,0.,90.,90.]}) )
