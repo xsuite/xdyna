@@ -240,6 +240,10 @@ class _DAMetaData:
         return Path(self.path, self.name + '.da_evol.' + self.db_extension).resolve() if self._use_files else None
 
     @property
+    def da_model_file(self):
+        return Path(self.path, self.name + '.model.' + self.db_extension).resolve() if self._use_files else None
+
+    @property
     def db_extension(self):
         return self._db_extension if self._use_files else None
 

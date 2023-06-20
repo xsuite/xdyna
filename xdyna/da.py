@@ -9,6 +9,7 @@ import sys
 
 from scipy import interpolate, integrate
 from scipy.special import lambertw as W
+from scipy.optimize import curve_fit
 # from scipy.constants import c as clight
 import numpy as np
 from numpy.random import default_rng
@@ -79,6 +80,7 @@ class DA:
         self._lower_davsturns = None
         self._upper_davsturns = None
         self._da_evol = None
+        self._da_model = None
         self._active_job = -1
         self._active_job_log = {}
         self._line = None
@@ -1774,6 +1776,209 @@ or for multiseeds:
             sys.stdout.write(f'\rCompute turn-by-turn statistic... Done!\n')
             self._lower_davsturns['stat']=stat_lower_davsturns
             self._upper_davsturns['stat']=stat_upper_davsturns
+
+    # =================================================================
+    # ========================== Fit models ===========================
+    # =================================================================
+
+    # Not allowed on parallel process
+    def _fit_model(self,nb_param,data_type,model,model_default=None,model_boundary=None,seed=None,
+                   nrand=1000,nsig=2,save=True,force=False):
+        '''DA vs turns fitting procedure.
+    
+    Parameters
+    ----------
+    nb_param:       Number of parameter from the Model used.
+    data_type:      Which data is used as: 'type1_type2' with type1 in ['lower','upper','uniform','normal'] and type2 in ['min','max','avg'].
+    model:          Either an element from ['2','2b','2n','4','4b','4n'] or a function. In the later case, also give model_default and model_boundary.
+    model_default:  A dict of the model parameters default values with parameters name as keys.
+    model_boundary: A dict of the model parameters boundarie with parameters name as keys.
+    seed:           The seed number for the multisees case.
+    force:          Erase previous results (Default=False).
+    '''
+        if self._da_model is None:
+            self.read_da_model()
+        
+        # Model selection
+        name='user';
+        if isinstance(model,str):
+            model=model.lower()
+            if ('model_2' ==model) or ('2' ==model):
+                name='2';  model=Model_2;   model_default=Model_2_default.copy();   model_boundary=Model_2_boundary.copy()
+            if ('model_2b'==model) or ('2b'==model):
+                name='2b'; model=Model_2b;  model_default=Model_2b_default.copy();  model_boundary=Model_2b_boundary.copy()
+            if ('model_2n'==model) or ('2n'==model):
+                name='2n'; model=Model_2n;  model_default=Model_2n_default.copy();  model_boundary=Model_2n_boundary.copy()
+            if ('model_4' ==model) or ('4' ==model):
+                name='4';  model=Model_4;   model_default=Model_4_default.copy();   model_boundary=Model_4_boundary.copy()
+            if ('model_4b'==model) or ('4b'==model):
+                name='4b'; model=Model_4b;  model_default=Model_4b_default.copy();  model_boundary=Model_4b_boundary.copy()
+            if ('model_4n'==model) or ('4n'==model):
+                name='4n'; model=Model_4n;  model_default=Model_4n_default.copy();  model_boundary=Model_4n_boundary.copy()
+            if 'N0' in model_boundary:
+                model_boundary['N0'][1]=self.max_turns
+        elif isinstance(model_default,dict) or isinstance(model_boundary,dict):
+            raise ValueError('If you give your own model, also give the model_default and model_boundary parameter values. They must be in the form of a dictionary.')
+
+        # Data type selection
+        if self.meta.nseeds!=0:
+            x=np.array(self._lower_davsturns[seed].loc[:,'turn'].values, dtype=float)
+            if 'lower_' in data_type:
+                y=np.array(self._lower_davsturns[seed].loc[:, data_type[6:] ].values, dtype=float)
+            elif 'upper_' in data_type:
+                y=np.array(self._upper_davsturns[seed].loc[:, data_type[6:] ].values, dtype=float)
+            elif 'uniform_' in data_type or 'normal_' in data_type:
+                xdata =np.array(self._lower_davsturns[seed].loc[:,'turn'].values, dtype=float)
+                ylower=np.array(self._lower_davsturns[seed].loc[:, data_type[len(data_type)-3:] ].values, dtype=float)
+                yupper=np.array(self._upper_davsturns[seed].loc[:, data_type[len(data_type)-3:] ].values, dtype=float)
+                rturns=(min(xdata),max(xdata))
+
+                xrand=np.floor(10**( (np.log10(rturns[1])-np.log10(rturns[0]))*np.random.uniform(size=[nrand])+np.log10(rturns[0]) )).astype(int)
+                if 'uniform_' in data_type:
+                    yrand=np.random.uniform(size=[nrand])
+                    for tmax,tmin,ylo,yup in zip(xdata[0:-1],xdata[1:],ylower[1:],yupper[1:]):
+                        mask= (xrand>=tmin) & (xrand<tmax)
+                        yrand[mask]=(yup-ylo)*yrand[mask]+ylo
+
+                elif 'normal_' in data_type:
+                    yrand=np.random.normal(loc=0.0,scale=0.5,size=[nrand])
+                    for tmax,tmin,ylo,yup in zip(xdata[0:-1],xdata[1:],ylower[1:],yupper[1:]):
+                        mask= (xrand>=tmin) & (xrand<tmax)
+                        yrand[mask]=(yup-ylo)*(yrand[mask]/nsig+0.5)+ylo
+                x=xrand; y=yrand
+            else:
+                raise ValueError('data_type must be one of the following form: [lower,upper,uniform,normal]_[min,max,avg]')
+            print(f'Running {data_type} Model {name} (Nb. param: {nb_param}) for seed {seed}')
+
+        else:
+            if 'lower_' in data_type:
+                y=np.array(self._lower_davsturns.loc[:, data_type[6:] ].values, dtype=float)
+            elif 'upper_' in data_type:
+                y=np.array(self._upper_davsturns.loc[:, data_type[6:] ].values, dtype=float)
+            elif 'uniform_' in data_type or 'normal_' in data_type:
+                xdata =np.array(self._lower_davsturns.loc[:,'turn'].values, dtype=float)
+                ylower=np.array(self._lower_davsturns.loc[:, data_type[8:] ].values, dtype=float)
+                yupper=np.array(self._upper_davsturns.loc[:, data_type[8:] ].values, dtype=float)
+                rturns=(min(xdata),max(xdata))
+
+                xrand=np.floor(10**( (np.log10(rturns[1])-np.log10(rturns[0]))*np.random.uniform(size=[nrand])+np.log10(rturns[0]) )).astype(int)
+                if 'uniform_' in data_type:
+                    yrand=np.random.uniform(size=[nrand])
+                    for tmax,tmin,ylo,yup in zip(xdata[0:-1],xdata[1:],ylower[1:],yupper[1:]):
+                        mask= (xrand>=tmin) & (xrand<tmax)
+                        yrand[mask]=(yup-ylo)*yrand[mask]+ylo
+
+                elif 'normal_' in data_type:
+                    yrand=np.random.normal(loc=0.0,scale=0.5,size=[nrand])
+                    for tmax,tmin,ylo,yup in zip(xdata[0:-1],xdata[1:],ylower[1:],yupper[1:]):
+                        mask= (xrand>=tmin) & (xrand<tmax)
+                        yrand[mask]=(yup-ylo)*(yrand[mask]/nsig+0.5)+ylo
+                x=xrand; y=yrand
+            else:
+                raise ValueError('data_type must be one of the following form: [lower,upper,uniform,normal]_[min,max,avg]')
+            print(f'Running {data_type} Model {name} (Nb. param: {nb_param})')
+            
+        if len(y)<=nb_param:
+            raise ValueError('There is not enougth data for the fitting procedure.')
+
+        # Fit the model
+        row=f'{data_type}_s{seed}'
+        if not force and self._da_model is not None:
+            if row in self._da_model.index and f'{name}_{nb_param:d}_res' in self._da_model.columns and self._da_model.loc[row,f'{name}_{nb_param:d}_res'] !=np.nan:
+                return
+        keys=np.array([k for k in model_boundary.keys()])
+        res={}
+        for nprm in range(1,min(nb_param,len(keys))+1):
+            # Select param default and boundary values
+            keys_fit=keys[:nprm]
+            dflt=tuple([model_default[k]  for k in keys_fit])
+            bndr=([model_boundary[k][0] for k in keys_fit],[model_boundary[k][1] for k in keys_fit])
+
+            # Fit model to plots
+            dflt_new, sg=curve_fit(model,x,y,p0=dflt,bounds=bndr)
+
+            # Select param default and boundary values
+            for k in range(0,nprm):
+                model_default[keys_fit[k]]=dflt_new[k]
+                res[f'{name}_{nprm:d}_{keys_fit[k]}']=[dflt_new[k]]
+            res[f'{name}_{nprm:d}_res']=[((y - model(x,**model_default))**2).sum() / (len(y)-nprm) ]
+            
+        res=pd.DataFrame(res,index=[row])
+        if self._da_model is None:
+            self._da_model=res
+        else:
+            if row not in self._da_model.index:
+                self._da_model=pd.concat([self._da_model,res],axis=0)
+            elif res.columns[0] not in self._da_model.columns:
+                self._da_model=pd.concat([self._da_model,res],axis=1)
+            else:
+                self._da_model.loc[row,res.columns]=res.loc[row,res.columns]
+        if save:
+            self.write_da_model()
+
+            
+    # Not allowed on parallel process
+    def _fit_model_from_list(self,nb_param,list_data_types=None,list_models=['2','2b','2n','4','4b','4n'],
+                             list_seeds=None,nrand=1000,nsig=2,force=False):
+        '''DA vs turns fitting procedure for a list of data_types, model or seed.
+    
+    Parameters
+    ----------
+    nb_param:        Number of parameter from the Model used.
+    list_data_types: List of data types as defined in `_fit_model`.
+    list_models:     List of in-build model as defined in `_fit_model`.
+    list_seeds:      List of seeds.
+    force:           Erase previous results (Default=False).
+    '''
+        if list_data_types is None:
+            list_data_types=[f'{d1}_{d2}' for d1 in ['lower','upper','uniform','normal'] for d2 in ['min','avg','max']]
+        if list_seeds is None:
+            if self.meta.nseeds!=0:
+                list_seeds = [ss for ss in range(1,self.meta.nseeds+1)].append('stat')
+            else:
+                list_seeds = [None]
+        
+        for ss in list_seeds:
+            for dt in list_data_types:
+                for md in list_models:
+                    self._fit_model(nb_param=nb_param,data_type=dt,model=md,seed=ss,
+                                    nrand=nrand,nsig=nsig,save=False,force=False)
+        
+        self.write_da_model()
+        
+        
+    # Not allowed on parallel process
+    def get_model_parameters(self,data_type,model,nb_parm,keys=None,seed=None):
+        if self._da_model is None:
+            self.read_da_model()
+        if self._da_model is None:
+            raise FileNotFoundError('No data for model fitting have been found.')
+        
+        model=model.lower()
+        if isinstance(model,str):
+            if model in ['Model_2','Model_2b','Model_2n','Model_4','Model_4b','Model_4n',
+                         '2','2b','2n','4','4b','4n']:
+                if ('Model_2' ==model) or ('2' ==model):
+                    name='2';  model=Model_2;   keys=[k for k in Model_2_default.keys()];
+                if ('Model_2b'==model) or ('2b'==model):
+                    name='2b'; model=Model_2b;  keys=[k for k in Model_2b_default.keys()];
+                if ('Model_2n'==model) or ('2n'==model):
+                    name='2n'; model=Model_2n;  keys=[k for k in Model_2n_default.keys()];
+                if ('Model_4' ==model) or ('4' ==model):
+                    name='4';  model=Model_4;   keys=[k for k in Model_4_default.keys()];
+                if ('Model_4b'==model) or ('4b'==model):
+                    name='4b'; model=Model_4b;  keys=[k for k in Model_4b_default.keys()];
+                if ('Model_4n'==model) or ('4n'==model):
+                    name='4n'; model=Model_4n;  keys=[k for k in Model_4n_default.keys()];
+        elif keys is None:
+            raise ValueError('Please specify the parameters name as keys.')
+        if seed is None and xdyna_da.meta.nseeds!=0:
+            raise ValueError('Please specify the seed.')
+        row=f'{data_type}_s{seed:d}'
+        param={k:self._da_model.loc[row,f'{name}_{nb_parm:d}_{k}'] for k in keys}
+        return model, param, self._da_model.loc[row,f'{name}_{nb_parm:d}_res']
+            
+    
                 
     # =================================================================
     # ==================== Manage tracking jobs =======================
@@ -1972,6 +2177,35 @@ or for multiseeds:
                     pf.truncate(0)  # Delete file contents (to avoid appending)
                     pf.seek(0)      # Move file pointer to start of file
                     self._da_evol.to_parquet(pf, index=True, engine="pyarrow")
+            else:
+                raise NotImplementedError
+
+    def da_model_exists(self):
+        return self.meta._use_files and self.meta.da_model_file.exists()
+
+    def read_da_model(self, pf=None):
+        if self.da_model_exists():
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.da_model_file, 'rb', wait=_db_access_wait_time) as pf:
+                        self._da_model = pd.read_parquet(pf, engine="pyarrow")
+                else:
+                    self._da_model = pd.read_parquet(pf, engine="pyarrow")
+            else:
+                raise NotImplementedError
+        else:
+            self._da_model = None
+
+    def write_da_model(self, pf=None):
+        if self.meta._use_files and not self.meta._read_only:
+            if self.meta.db_extension=='parquet':
+                if pf is None:
+                    with ProtectFile(self.meta.da_model_file, 'wb', wait=_db_access_wait_time) as pf:
+                        self._da_model.to_parquet(pf, index=True, engine="pyarrow")
+                else:
+                    pf.truncate(0)  # Delete file contents (to avoid appending)
+                    pf.seek(0)      # Move file pointer to start of file
+                    self._da_model.to_parquet(pf, index=True, engine="pyarrow")
             else:
                 raise NotImplementedError
 
@@ -2525,6 +2759,45 @@ def fit_DA(x, y, xrange):
     
     
 
+# DA vs Turns Models
+# --------------------------------------------------------
+# from xdyna.da import Model_2, Model_2b, Model_4, Model_4b
+def Model_2(N, rho=1, K=1, N0=1):            # Eq. 20
+    return rho * ( K/( 2*np.exp(1)*np.log(N/N0) ) )**K 
+Model_2_default  ={'rho':1, 'K':1, 'N0':1}
+Model_2_boundary ={'rho':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf]}
+
+def Model_2b(N, btilde=1, K=1, N0=1, B=1):   # Eq. 35a
+    return btilde / ( B*np.log(N/N0) )**K      
+Model_2b_default ={'btilde':1, 'K':1, 'N0':1, 'B':1}
+Model_2b_boundary={'btilde':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf], 'B':[1e-14,np.inf]}
+
+def Model_2n(N, b=1, K=1, N0=1):             # Eq. 2 from Frederik
+    return b / ( np.log(N/N0) )**K      
+Model_2n_default ={'b':1, 'K':1, 'N0':1}
+Model_2n_boundary={'b':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf]}
+
+
+
+def Model_4(N, rho=1, K=1, lmbd=0.5):        # Eq. 23
+    return rho / ( -(2*np.exp(1)*lmbd) * np.real(W( (-1/(2*np.exp(1)*lmbd)) * (rho/6)**(1/K) * (8*N/7)**(-1/(lmbd*K)) ,k=-1)) )**K  
+Model_4_default  ={'rho':1, 'K':1, 'lmbd':0.5}
+Model_4_boundary ={'rho':[1e-14,np.inf], 'K':[0.01,2], 'lmbd':[1e-14,np.inf]}
+
+def Model_4b(N, btilde=1, K=1, N0=1, B=1):   # Eq. 35c
+    return btilde / (-(0.5*K*B) * np.real(W( (-2/(K*B)) * (N/N0)**(-2/K) ,k=-1)) )**K  
+Model_4b_default ={'btilde':1, 'K':1, 'N0':1, 'B':1}
+Model_4b_boundary={'btilde':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf], 'B':[1e-14,np.inf]}
+
+def Model_4n(N, rho=1, K=1, mu=1):           # Eq. 4 from Frederik
+    return rho / (- np.real(W( (mu*N)**(-2/K) ,k=-1)) )**K  
+Model_4n_default ={'rho':1, 'K':1, 'mu':1}
+Model_4n_boundary={'rho':[1e-14,np.inf], 'K':[0.01,2], 'mu':[1e-14,np.inf]}
+# --------------------------------------------------------
+    
+    
+    
+
 # DA smoothing procedure
 # --------------------------------------------------------
 # Not allowed on parallel process
@@ -2723,9 +2996,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
 
 #             print(it)
         it+=1
-
-
-
+    
     return tmp_border_min,tmp_border_max
 # --------------------------------------------------------
     
@@ -2734,7 +3005,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
 
 # Function loading SixDesk/SixDB outputs into XDyna
 # --------------------------------------------------------
-def load_sixdesk_output(path,study,load_line=False):
+def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emitance, if emitqance difference from file inform that if BBsome results will be wrong
     ## SIXDESK
     ## -----------------------------------
     # Load meta
