@@ -996,15 +996,18 @@ class DA:
         job_id = str(self._active_job)
 
         # Define tracking procedure
-        def track_per_seed(context, tracker, x_norm, y_norm, px_norm, py_norm, zeta, delta, nemitt_x, nemitt_y, nturn):
+#         def track_per_seed(context, tracker, x_norm, y_norm, px_norm, py_norm, zeta, delta, nemitt_x, nemitt_y, nturn):
+        def track_per_seed(context, line, x_norm, y_norm, px_norm, py_norm, zeta, delta, nemitt_x, nemitt_y, nturn):
             # Create initial particles
             part = xp.build_particles(_context=context,
-                                      tracker=tracker,
+#                                       tracker=tracker,
+                                      line=line,
                                       x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
                                       nemitt_x=nemitt_x, nemitt_y=nemitt_y
                                      )
             # Track
-            tracker.track(particles=part, num_turns=nturn)
+#             tracker.track(particles=part, num_turns=nturn)
+            line.track(particles=part, num_turns=nturn)
             context.synchronize()
             return part
 
@@ -1024,7 +1027,8 @@ class DA:
             delta   = self._surv.loc[part_ids, 'delta_in'].to_numpy()
 
             self._append_job_log('output', datetime.datetime.now().isoformat() + '  Start tracking job ' + str(job_id) + '.', logging=logging)
-            part=track_per_seed(context,self.line.tracker,
+#             part=track_per_seed(context,self.line.tracker,
+            part=track_per_seed(context,self.line,
                                 x_norm, y_norm, px_norm, py_norm, zeta, delta, 
                                 self.nemitt_x, self.nemitt_y, self.meta.max_turns)
             self._append_job_log('output', datetime.datetime.now().isoformat() + '  Done tracking job ' + str(job_id) + '.', logging=logging)
