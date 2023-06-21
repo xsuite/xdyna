@@ -14,9 +14,6 @@ from scipy.optimize import curve_fit
 import numpy as np
 from numpy.random import default_rng
 import pandas as pd
-# pd.DataFrame.to_parquet does not support Multiindex. The two following package are needed to bypass this.
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 import xobjects as xo
 import xtrack as xt
