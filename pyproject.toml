@@ -4,25 +4,33 @@ version = "0.1.1"
 description = "Xsuite dynamics package"
 homepage = "https://github.com/xsuite/xdyna"
 repository = "https://github.com/xsuite/xdyna"
-authors = ["Frederik F. Van der Veken <frederik@cern.ch>"]
+authors = [
+	"Frederik F. Van der Veken <frederik@cern.ch>",
+	"Thomas Pugnat <thomas.pugnat@cern.ch>",
+	"Michael Höfer <michael.hofer@cern.ch>",
+]
 readme = "README.md"
 license = "Apache 2.0"
 include = [ "LICENSE", "NOTICE" ]
+
 
 [tool.poetry.dependencies]
 python = ">=3.8"
 scipy = ">=1.9.3"
 pandas = ">=1.5.1"
+xobjects = ">=0.2.6"
+xdeps = ">=0.1.1"
+xpart = ">=0.15.0"
+xtrack = ">=0.36.5"
+xfields = ">=0.12.1"
 
 [tool.poetry.dev-dependencies]
-pytest = "^5.2"
+pytest = ">=7.3"
 
-[tool.poetry.group.gh_actions]
-optional = true
-
-[tool.poetry.group.gh_actions.dependencies]
-xsuite = ">=0.4.0"
+[tool.poetry.extras]
+tests = ["pytest", "ruamel-yaml"]
 
 [build-system]
-requires = ["poetry-core>=1.0.8"]  # Needed for pip install -e
+# Needed for pip install -e (BTW: need pip version 22)
+requires = ["poetry-core>=1.0.8"]
 build-backend = "poetry.core.masonry.api"
