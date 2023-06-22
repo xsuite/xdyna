@@ -1,6 +1,7 @@
 from math import floor
 from pathlib import Path
 from os.path import exists
+import warnings
 import json
 import datetime
 import time
@@ -1826,7 +1827,7 @@ or for multiseeds:
 
         # Data type selection
         if self.meta.nseeds!=0:
-            row=pd.MultiIndex.from_tuples([(data_type[0],data_type[1],seed)], names=["method", "type", "seed"])
+            row=pd.MultiIndex.from_tuples([(data_type[0],data_type[1],f'{seed}')], names=["method", "type", "seed"])
             x=np.array(self._lower_davsturns[seed].loc[:,'turn'].values, dtype=float)
             if 'lower' == data_type[0]:
                 y=np.array(self._lower_davsturns[seed].loc[:, data_type[1] ].values, dtype=float)
@@ -1899,23 +1900,29 @@ or for multiseeds:
             print(f'Running {data_type} Model {name} (Nb. param: {nb_param})')
 
         # Fit the model
-        keys=np.array([k for k in model_boundary.keys()])
-        res={}
+        keys=np.array([k for k in model_boundary.keys()]); res={}
         for nprm in range(1,min(nb_param,len(keys))+1):
             # Select param default and boundary values
             keys_fit=keys[:nprm]
             dflt=tuple([model_default[k]  for k in keys_fit])
             bndr=([model_boundary[k][0] for k in keys_fit],[model_boundary[k][1] for k in keys_fit])
 
-            # Fit model to plots
-            dflt_new, sg=curve_fit(model,x,y,p0=dflt,bounds=bndr)
-
+            try:
+                # Fit model to plots
+                dflt_new, sg=curve_fit(model,x,y,p0=dflt,bounds=bndr)
+                error=((y - model(x,**model_default))**2).sum() / (len(y)-nprm)
+            except Exception as err:
+                warnings.warn(f"[{type(err)}] No solution found for {data_type} Model {name} (Nb. param: {nprm}). Return 0.")
+                dflt_new=tuple([0 for k in dflt]); error=0
+                
             # Select param default and boundary values
             for k in range(0,nprm):
                 model_default[keys_fit[k]]=dflt_new[k]
                 res[(name,nprm,keys_fit[k])]=[dflt_new[k]]
-            res[(name,nprm,'res')]=[((y - model(x,**model_default))**2).sum() / (len(y)-nprm) ]
+            res[(name,nprm,'res')]=[ error ]
+                
             
+        # Save results
         res=pd.DataFrame(res,index=row)
         res.columns.names=["model", "nprm", "key"]
         if self._da_model is None:
@@ -2007,15 +2014,9 @@ or for multiseeds:
             raise ValueError('Please specify the seed.')
         
         if self.meta.nseeds!=0:
-            row=pd.MultiIndex.from_tuples([(data_type[0],data_type[1],seed)], names=["method", "type", "seed"])
+            row=pd.MultiIndex.from_tuples([(data_type[0],data_type[1],f'{seed}')], names=["method", "type", "seed"])
         else:
             row=pd.MultiIndex.from_tuples([(data_type[0],data_type[1])], names=["method", "type"])
-        for k in keys:
-            print(k)
-            print(row)
-            print(row[0])
-            print(self._da_model.loc[row[0],(name,nb_parm,k)])
-            print()
         param={k:self._da_model.loc[row[0],(name,nb_parm,k)] for k in keys}
         return model, param, self._da_model.loc[row[0],(name,nb_parm,'res')]
             
@@ -2245,6 +2246,7 @@ or for multiseeds:
     def write_da_model(self, pf=None):
         if self.meta._use_files and not self.meta._read_only:
             if self.meta.db_extension=='parquet':
+                self._da_model.fillna(0)
                 # Change columns format in order to be saved/loaded
                 save_col=self._da_model.columns.copy()
                 self._da_model.columns=[f'{c[0]} {c[1]} {c[2]}' for c in self._da_model.columns]
@@ -2617,14 +2619,6 @@ descend = np.frompyfunc(lambda x, y: y if y < x else x, 2, 1)
     
     
 
-# Models for davsturn fitting
-# --------------------------------------------------------
-# Taken from https://journals.aps.org/prab/pdf/10.1103/PhysRevAccelBeams.22.104003
-# --------------------------------------------------------
-    
-    
-    
-
 # --------------------------------------------------------
 def _calculate_radial_evo(data):
     # We select the window in number of turns for which each angle has values
@@ -2807,38 +2801,38 @@ def fit_DA(x, y, xrange):
 
 # DA vs Turns Models
 # --------------------------------------------------------
-# from xdyna.da import Model_2, Model_2b, Model_4, Model_4b
+# Taken from https://journals.aps.org/prab/pdf/10.1103/PhysRevAccelBeams.22.104003
 def Model_2(N, rho=1, K=1, N0=1):            # Eq. 20
     return rho * ( K/( 2*np.exp(1)*np.log(N/N0) ) )**K 
 Model_2_default  ={'rho':1, 'K':1, 'N0':1}
-Model_2_boundary ={'rho':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf]}
+Model_2_boundary ={'rho':[1e-10,np.inf], 'K':[0.01,2], 'N0':[1,np.inf]}
 
 def Model_2b(N, btilde=1, K=1, N0=1, B=1):   # Eq. 35a
     return btilde / ( B*np.log(N/N0) )**K      
 Model_2b_default ={'btilde':1, 'K':1, 'N0':1, 'B':1}
-Model_2b_boundary={'btilde':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf], 'B':[1e-14,np.inf]}
+Model_2b_boundary={'btilde':[1e-10,np.inf], 'K':[0.01,2], 'N0':[1,np.inf], 'B':[1e-10,1e5]}
 
 def Model_2n(N, b=1, K=1, N0=1):             # Eq. 2 from Frederik
     return b / ( np.log(N/N0) )**K      
 Model_2n_default ={'b':1, 'K':1, 'N0':1}
-Model_2n_boundary={'b':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf]}
+Model_2n_boundary={'b':[1e-10,np.inf], 'K':[0.01,2], 'N0':[1,np.inf]}
 
 
 
 def Model_4(N, rho=1, K=1, lmbd=0.5):        # Eq. 23
     return rho / ( -(2*np.exp(1)*lmbd) * np.real(W( (-1/(2*np.exp(1)*lmbd)) * (rho/6)**(1/K) * (8*N/7)**(-1/(lmbd*K)) ,k=-1)) )**K  
 Model_4_default  ={'rho':1, 'K':1, 'lmbd':0.5}
-Model_4_boundary ={'rho':[1e-14,np.inf], 'K':[0.01,2], 'lmbd':[1e-14,np.inf]}
+Model_4_boundary ={'rho':[1e-10,1e10], 'K':[0.01,2], 'lmbd':[1e-10,1e10]}
 
 def Model_4b(N, btilde=1, K=1, N0=1, B=1):   # Eq. 35c
     return btilde / (-(0.5*K*B) * np.real(W( (-2/(K*B)) * (N/N0)**(-2/K) ,k=-1)) )**K  
 Model_4b_default ={'btilde':1, 'K':1, 'N0':1, 'B':1}
-Model_4b_boundary={'btilde':[1e-14,np.inf], 'K':[0.01,2], 'N0':[1,np.inf], 'B':[1e-14,np.inf]}
+Model_4b_boundary={'btilde':[1e-10,np.inf], 'K':[0.01,2], 'N0':[1,np.inf], 'B':[1e-10,1e10]}
 
 def Model_4n(N, rho=1, K=1, mu=1):           # Eq. 4 from Frederik
     return rho / (- np.real(W( (mu*N)**(-2/K) ,k=-1)) )**K  
 Model_4n_default ={'rho':1, 'K':1, 'mu':1}
-Model_4n_boundary={'rho':[1e-14,np.inf], 'K':[0.01,2], 'mu':[1e-14,np.inf]}
+Model_4n_boundary={'rho':[1e-10,np.inf], 'K':[0.01,2], 'mu':[1e-10,1e10]}
 # --------------------------------------------------------
     
     
@@ -2993,7 +2987,6 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
                             continue_smoothing=True
 #                                 print(f'Specific add:\n{c}')
 
-
                         iloss+=1
 
 
@@ -3051,7 +3044,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
 
 # Function loading SixDesk/SixDB outputs into XDyna
 # --------------------------------------------------------
-def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emitance, if emitqance difference from file inform that if BBsome results will be wrong
+def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emitance, if emittance difference from file inform that if BB some results will be wrong
     ## SIXDESK
     ## -----------------------------------
     # Load meta
