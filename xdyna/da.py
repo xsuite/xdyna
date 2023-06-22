@@ -1,6 +1,5 @@
 from math import floor
 from pathlib import Path
-from os.path import exists
 import warnings
 import json
 import datetime
@@ -308,6 +307,10 @@ class DA:
                 return
             else:
                 file = self.line_file
+        file = Path(file)
+        if not file.exists():
+            raise ValueError(f"Line file {file.as_posix()} not found!")
+
         with ProtectFile(file, 'r') as pf:
             line = json.load(pf)
 
@@ -1196,6 +1199,86 @@ class DA:
     # ========================= Calculate DA ==========================
     # =================================================================
 
+    @property
+    def t_steps(self):
+        return self._t_steps
+
+    def da(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DA')
+
+    def da_min(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DAmin')
+
+    def da_max(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DAmax')
+
+    def da_lower(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DA lower')
+
+    def da_min_lower(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DAmin lower')
+
+    def da_max_lower(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DAmax lower')
+
+    def da_upper(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DA upper')
+
+    def da_min_upper(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DAmin upper')
+
+    def da_max_upper(self, t=None, seed=None):
+        return self._get_da_prop(t=t, seed=seed, prop='DAmax upper')
+
+    def border(self, t=None, seed=None):
+        x = self._get_da_prop(t=t, seed=seed, prop='x', data=self._border, \
+                              enforce_single=False)
+        y = self._get_da_prop(t=t, seed=seed, prop='y', data=self._border, \
+                              enforce_single=False)
+        # TODO: 4D, 5D, 6D ...
+        return [x, y]
+
+    def border_lower(self, t=None, seed=None):
+        x = self._get_da_prop(t=t, seed=seed, prop='x lower', data=self._border, \
+                              enforce_single=False)
+        y = self._get_da_prop(t=t, seed=seed, prop='y lower', data=self._border, \
+                              enforce_single=False)
+        # TODO: 4D, 5D, 6D ...
+        return [x, y]
+
+    def border_upper(self, t=None, seed=None):
+        x = self._get_da_prop(t=t, seed=seed, prop='x upper', data=self._border, \
+                              enforce_single=False)
+        y = self._get_da_prop(t=t, seed=seed, prop='y upper', data=self._border, \
+                              enforce_single=False)
+        # TODO: 4D, 5D, 6D ...
+        return [x, y]
+
+    def _get_da_prop(self, t, seed, prop, data=None, enforce_single=True):
+        ss = "" if seed is None else f"and seed {seed}"
+        if self.meta.nseeds == 0:
+            if seed is not None:
+                raise ValueError("Cannot use 'seed' as this DA object has no seeds!")
+            seed = 0
+        elif seed is None:
+            raise ValueError("Need to specify a seed.")
+
+        if t is None:
+            t = self.max_turns
+        elif t not in self.t_steps[seed]:
+            # TODO interpolate times in between
+            raise NotImplementedError
+
+        if data is None:
+            data = self._da
+        result = data.loc[('seed'==seed) & ('t'==t), prop]
+        if enforce_single:
+            if len(result) > 1:
+                raise ValueError(f"Found multiple values for {prop} at time {t}{ss}.")
+            return result.values[0]
+        else:
+            return result.values
+
 
     # Not allowed on parallel process
     def get_lower_da(self,at_turn=None,seed=None):
@@ -1248,8 +1331,8 @@ class DA:
 
 
     # Not allowed on parallel process
-    def calculate_da(self,at_turn=None,angular_precision=10,smoothing=True,list_seed=None,
-                     interp_order='1D',interp_method='trapz'):
+    def calculate_da(self, at_turn=None, angular_precision=10, smoothing=True, list_seed=None,
+                     interp_order='1D', interp_method='trapz'):
         '''Compute the DA upper and lower estimation at a specific turn in the form of a pandas table:
     ['turn','border','avg','min','max']
         
@@ -1268,10 +1351,10 @@ or for multiseeds:
     ----------
     The borders might change after using calculate_davsturns as it imposes turn-by-turn monoticity.
 '''
-        
+
         if self.survival_data is None:
             raise ValueError('Run the simulation before using plot_particles.')
-            
+
         if interp_order=='1D':
             compute_da=compute_da_1D
         elif interp_order=='2D':
@@ -2261,345 +2344,6 @@ or for multiseeds:
                 self._da_model.columns=save_col
             else:
                 raise NotImplementedError
-
-    # =================================================================
-    # ============================ Plot DA ============================
-    # =================================================================
-
-    def plot_particles(self,ax, at_turn=None, type_plot="polar", seed=None,
-                       closses="red", csurviving="blue", size_scaling="log", **kwargs):
-        """Scatter plot of the lost and surviving particles.
-    
-    Parameters
-    ----------
-    ax:           Plot axis.
-    at_turn:      All particles surviving at least this number of turns are considered as surviving.
-    seed:         In case of multiseed simulation, the seed number must be specified (Default=None).
-    type_plot:    x-y for cartesian, ang-amp for polar (Default="polar").
-    csurviving:   Color of surviving dots (Default="blue"). Use "" to disable.
-    closses:      Color of losses dots (Default="red"). Use "" to disable.
-    size_scaling: Type of losses dot scaling (Default="log"). There are 3 options: "linear", "log", None.
-"""
-            
-        if self.survival_data is None:
-            raise ValueError('Run the simulation before using plot_particles.')
-        if self.meta.nseeds>0 and (seed==None or seed=='stat'):
-            raise ValueError('For multiseed simulation, please specify a seed number.')
-        # Clean kwargs and initiallize parameters
-        kwargs=dict(kwargs)
-        if 'c' in kwargs:
-            kwargs.pop('c')
-        if 'color' in kwargs:
-            kwargs.pop('color')
-#         label=''
-        if 'label' in kwargs:
-#             label=kwargs['label']
-            kwargs.pop('label')
-            
-        if at_turn is None:
-            at_turn=self.max_turns
-        if self.meta.nseeds==0:
-            data = self.survival_data.copy()
-        else:
-            data = self.survival_data[self.survival_data.seed==seed].copy()
-            
-        if type_plot=="polar":
-            if "angle" not in data.columns or "amplitude" not in data.columns:
-                data['angle']    = np.arctan2(data['y'],data['x'])*180/np.pi
-                data['amplitude']= np.sqrt(data['x']**2+data['y']**2)
-                
-            if csurviving is not None and csurviving!='':
-                surv=data.loc[data['nturns']>=at_turn,:]
-                ax.scatter(surv['angle'],surv['amplitude'],color=csurviving,label="Surv.", **kwargs)
-            if closses is not None and closses!='':
-                import matplotlib.pyplot as plt
-                
-                loss=data.loc[data['nturns']<at_turn,:]
-                if size_scaling in ["linear","log"]:
-                    if size_scaling=="linear":
-                        size=(loss['nturns'].to_numpy()/at_turn) * plt.rcParams['lines.markersize']
-                    elif size_scaling=="log":
-                        loss=loss.loc[loss['nturns']>0,:]
-                        size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
-                        
-                    ax.scatter(loss['angle'],loss['amplitude'],size**2,color=closses,label="Loss.", **kwargs)
-                else:
-                    ax.scatter(loss['angle'],loss['amplitude'],color=closses,label="Loss.", **kwargs)
-                
-                ax.set_xlabel(r'Angle [$^{\circ}$]')
-                ax.set_ylabel(r'Amplitude [$\sigma$]')
-                
-        elif type_plot=="cartesian":
-            if "x" not in data.columns or "y" not in data.columns:
-                data['x']= data['amplitude']*np.cos(data['angle']*np.pi/180)
-                data['y']= data['amplitude']*np.sin(data['angle']*np.pi/180)
-                
-            if csurviving is not None and csurviving!='':
-                surv=data.loc[data['nturns']>=at_turn,:]
-                ax.scatter(surv['x'],surv['y'],color=csurviving,label="Surv.", **kwargs)
-            if closses is not None and closses!='':
-                import matplotlib.pyplot as plt
-                
-                loss=data.loc[data['nturns']<at_turn,:]
-                
-                if size_scaling in ["linear","log"]:
-                    if size_scaling=="linear":
-                        size=(loss['nturns'].to_numpy()/at_turn) * plt.rcParams['lines.markersize']
-                    elif size_scaling=="log":
-                        loss=loss.loc[loss['nturns']>0,:]
-                        size=(np.log10(loss['nturns'].to_numpy())/np.log10(at_turn)) * plt.rcParams['lines.markersize']
-                        
-                    ax.scatter(loss['x'],loss['y'],size**2,color=closses,label="Loss.", **kwargs)
-                else:
-                    ax.scatter(loss['x'],loss['y'],color=closses,label="Loss.", **kwargs)
-                
-                ax.set_xlabel(r'x [$\sigma$]')
-                ax.set_ylabel(r'y [$\sigma$]')
-            
-        else:
-            raise ValueError('type_plot can only be either "polar" or "cartesian".')
-
-            
-    def plot_da_border(self,ax, at_turn=None, seed=None, type_plot="polar", clower="blue", cupper="red", **kwargs):
-        """Plot the DA border.
-    
-    Parameters
-    ----------
-    ax:        Plot axis.
-    at_turn:   All particles surviving at least this number of turns are considered as surviving.
-    seed:      In case of multiseed simulation, the seed number must be specified (Default=None).
-    type_plot: x-y for cartesian, ang-amp for polar (Default="polar").
-    clower:    Color of the lower DA estimation (Default="blue"). Use "" to disable.
-    cupper:    Color of the upper DA estimation (Default="red"). Use "" to disable.
-"""
-        
-#         if self.meta.pairs_shift != 0:
-#             raise NotImplementedError("The DA computing methods have not been implemented for pairs yet!")
-        if self.meta.nseeds>0 and seed==None:
-            raise ValueError('For multiseed simulation, please specify a seed number.')
-        if seed=='stat':
-            raise ValueError('"stat" border is not computed yet.')
-        # Clean kwargs and initiallize parameters
-        kwargs=dict(kwargs)
-        if 'c' in kwargs:
-            kwargs.pop('c')
-        if 'color' in kwargs:
-            kwargs.pop('color')
-        label=''
-        if 'label' in kwargs:
-            label=kwargs['label']
-            kwargs.pop('label')
-            
-        if at_turn is None:
-            at_turn=self.max_turns
-        if self._lower_davsturns is None:
-            self.calculate_da(at_turn=at_turn,angular_precision=1,smoothing=True)
-    
-        if "angle" not in self.survival_data.columns:
-            angle= np.arctan2(self.survival_data['y'],self.survival_data['x'])*180/np.pi
-        else:
-            angle= np.array(self.survival_data.angle)
-        ang_range=(min(angle),max(angle))
-        
-        if self.meta.nseeds==0:
-            lower_da=self._lower_davsturns
-            upper_da=self._upper_davsturns
-        else:
-            lower_da=self._lower_davsturns[seed]
-            upper_da=self._upper_davsturns[seed]
-            
-        at_turn=max(lower_da.turn[lower_da.turn<=at_turn])
-
-        fit_min=fit_DA(lower_da.loc[at_turn,'border'][0].angle, 
-                       lower_da.loc[at_turn,'border'][0].amplitude, ang_range)
-        fit_max=fit_DA(upper_da.loc[at_turn,'border'][0].angle, 
-                       upper_da.loc[at_turn,'border'][0].amplitude, ang_range)
-        
-        amplitude_min=fit_min(angle)
-        amplitude_max=fit_max(angle)
-        sort = np.argsort(angle)
-        angle= angle[sort]; amplitude_min = amplitude_min[sort]; amplitude_max = amplitude_max[sort]
-        if type_plot=="polar":
-            if clower is not None and clower!='':
-                ax.plot(angle,amplitude_min,color=clower,label=label+' (min)',**kwargs)
-
-            if cupper is not None and cupper!='':
-                ax.plot(angle,amplitude_max,color=cupper,label=label+' (max)',**kwargs)
-                    
-            ax.set_xlabel(r'Angle [$^{\circ}$]')
-            ax.set_ylabel(r'Amplitude [$\sigma$]')
-                
-        elif type_plot=="cartesian":
-            if clower is not None and clower!='':
-                x= amplitude_min*np.cos(angle*np.pi/180)
-                y= amplitude_min*np.sin(angle*np.pi/180)
-                ax.plot(x,y,color=clower,label=label+' (min)',**kwargs)
-                    
-            if cupper is not None and cupper!='':
-                x= amplitude_max*np.cos(angle*np.pi/180)
-                y= amplitude_max*np.sin(angle*np.pi/180)
-                ax.plot(x,y,color=cupper,label=label+' (max)',**kwargs)
-                
-            ax.set_xlabel(r'x [$\sigma$]')
-            ax.set_ylabel(r'y [$\sigma$]')
-            
-        else:
-            raise ValueError('type_plot can only be either "polar" or "cartesian".')
-
-            
-    def plot_davsturns_border(self,ax, from_turn=1e3, to_turn=None, seed=None, clower="blue", cupper="red", 
-                              show_seed=True, show_Nm1=True, **kwargs):
-        """Plot the DA as a function of turns.
-    
-    Parameters
-    ----------
-    ax:        Plot axis.
-    from_turn: Lower turn range (Default: from_turn=1e3).
-    at_turn:   Upper turn range (Default: at_turn=max_turns).
-    seed:      In case of multiseed simulation, the seed number must be specified (Default=None).
-    clower:    Color of the lower da vs turns stat. Set to '' will not show the plot (Default: "blue").
-    cupper:    Color of the upper da vs turns stat. Set to '' will not show the plot (Default: "red").
-    show_seed: Plot seeds (Default: True).
-    show_Nm1:  Plot davsturns as a stepwise function (Default: True).
-"""
-        
-        if self.meta.nseeds>0 and seed==None:
-            raise ValueError('For multiseed simulation, please specify the seed.')
-        if self.meta.nseeds==0 and seed=='stat':
-            raise ValueError('"stat" is only available for multiseed simulation.')
-            
-        # Clean kwargs and initiallize parameters
-        kwargs=dict(kwargs)
-        if 'c' in kwargs:
-            kwargs.pop('c')
-        if 'color' in kwargs:
-            kwargs.pop('color')
-        alpha=1
-        if 'alpha' in kwargs:
-            alpha=kwargs['alpha']
-            kwargs.pop('alpha')
-        label=''
-        if 'label' in kwargs:
-            label=kwargs['label']
-            kwargs.pop('label')
-        
-        if to_turn is None:
-            to_turn=self.max_turns
-            
-        if self._lower_davsturns is None:
-            self.calculate_davsturns(from_turn=from_turn,to_turn=to_turn)
-            
-        if self.meta.nseeds==0:
-            lower_da=self._lower_davsturns
-            upper_da=self._upper_davsturns
-        else:
-            lower_da=self._lower_davsturns[seed]
-            upper_da=self._upper_davsturns[seed]
-        
-        # Select the range of data
-        lturns_data=np.array([t for t in lower_da.turn if t>=from_turn and t<=to_turn])
-        lturns_data=lturns_data[np.argsort(lturns_data)]
-        lturns_prev=[t-1 for t in lturns_data if t>from_turn and t<=to_turn]
-                
-        if cupper is not None and cupper!='':
-            # Load Data
-            davsturns_avg=upper_da.loc[lturns_data,'avg'] ;
-            davsturns_min=upper_da.loc[lturns_data,'min'] ;
-            davsturns_max=upper_da.loc[lturns_data,'max'] ;
-            
-            # Add step at turns-1
-            if show_Nm1:
-                for prev,turn in zip(lturns_prev, lturns_data[0:-1]):
-                    davsturns_avg[prev]=davsturns_avg[turn]
-                    davsturns_min[prev]=davsturns_min[turn]
-                    davsturns_max[prev]=davsturns_max[turn]
-            
-            lturns=np.array(davsturns_avg.index.tolist())
-            lturns=lturns[np.argsort(lturns)]
-            y_avg=np.array(davsturns_avg[lturns], dtype=float)
-            y_min=np.array(davsturns_min[lturns], dtype=float)
-            y_max=np.array(davsturns_max[lturns], dtype=float)
-
-            # Plot the results
-            ax.plot(lturns,y_avg,ls="-.",label=label,color=cupper,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_min,ls="-", label='',   color=cupper,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_max,ls="-", label='',   color=cupper,alpha=alpha,**kwargs);
-
-            ax.fill_between(lturns,y_min, y_max,color=cupper,alpha=alpha*0.1,**kwargs)
-            
-            if seed=='stat' and show_seed:
-                for s in range(1,self.meta.nseeds+1):
-                    # Select the range of data
-                    slturns_data=np.array([t for t in self._upper_davsturns[s].turn if t>=from_turn and t<=to_turn])
-                    slturns_data=slturns_data[np.argsort(slturns_data)]
-                    slturns_prev=[t-1 for t in slturns_data if t>from_turn and t<=to_turn]
-        
-                    # Load Data
-                    davsturns_avg=self._upper_davsturns[s].loc[slturns_data,'avg'] ;
-
-                    # Add step at turns-1
-                    if show_Nm1:
-                        for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
-                            davsturns_avg[prev]=davsturns_avg[turn]
-
-                    lturns=np.array(davsturns_avg.index.tolist())
-                    lturns=lturns[np.argsort(lturns)]
-                    y_avg=np.array(davsturns_avg[lturns], dtype=float)
-
-                    # Plot the results
-                    ax.plot(lturns,y_avg,ls="-.",lw=1,label='',color=cupper,alpha=alpha*0.3,**kwargs);
-
-        
-        if clower is not None and clower!='':
-            # Load Data
-            davsturns_avg=lower_da.loc[lturns_data,'avg'] ;
-            davsturns_min=lower_da.loc[lturns_data,'min'] ;
-            davsturns_max=lower_da.loc[lturns_data,'max'] ;
-            
-            # Add step at turns-1
-            if show_Nm1:
-                for prev,turn in zip(lturns_prev, lturns_data[0:-1]):
-                    davsturns_avg[prev]=davsturns_avg[turn]
-                    davsturns_min[prev]=davsturns_min[turn]
-                    davsturns_max[prev]=davsturns_max[turn]
-            
-            lturns=np.array(davsturns_avg.index.tolist())
-            lturns=lturns[np.argsort(lturns)]
-            y_avg=np.array(davsturns_avg[lturns], dtype=float)
-            y_min=np.array(davsturns_min[lturns], dtype=float)
-            y_max=np.array(davsturns_max[lturns], dtype=float)
-
-            # Plot the results
-            ax.plot(lturns,y_avg,ls="-.",label=label,color=clower,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_min,ls="-", label='',   color=clower,alpha=alpha,**kwargs);
-            ax.plot(lturns,y_max,ls="-", label='',   color=clower,alpha=alpha,**kwargs);
-
-            ax.fill_between(lturns,y_min, y_max,color=clower,alpha=alpha*0.1,**kwargs)
-            
-            if seed=='stat' and show_seed:
-                for s in range(1,self.meta.nseeds+1):
-                    # Select the range of data
-                    slturns_data=np.array([t for t in self._lower_davsturns[s].turn if t>=from_turn and t<=to_turn])
-                    slturns_data=slturns_data[np.argsort(slturns_data)]
-                    slturns_prev=[t-1 for t in slturns_data if t>from_turn and t<=to_turn]
-        
-                    # Load Data
-                    davsturns_avg=self._lower_davsturns[s].loc[slturns_data,'avg'] ;
-
-                    # Add step at turns-1
-                    if show_Nm1:
-                        for prev,turn in zip(slturns_prev, slturns_data[0:-1]):
-                            davsturns_avg[prev]=davsturns_avg[turn]
-
-                    lturns=np.array(davsturns_avg.index.tolist())
-                    lturns=lturns[np.argsort(lturns)]
-                    y_avg=np.array(davsturns_avg[lturns], dtype=float)
-
-                    # Plot the results
-                    ax.plot(lturns,y_avg,ls="-.",lw=1,label='',color=clower,alpha=alpha*0.3,**kwargs);
-        
-        ax.set_xlabel(r'Turns [1]')
-        ax.set_ylabel(r'Amplitude [$\sigma$]')
             
     
     # =================================================================
@@ -3044,7 +2788,7 @@ def _da_smoothing(data,raw_border_min,raw_border_max,at_turn,removed=pd.DataFram
 
 # Function loading SixDesk/SixDB outputs into XDyna
 # --------------------------------------------------------
-def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emitance, if emittance difference from file inform that if BB some results will be wrong
+def load_sixdesk_output(path, study, load_line=False): # TODO: Add reference emitance, if emittance difference from file inform that if BB some results will be wrong
     ## SIXDESK
     ## -----------------------------------
     # Load meta
@@ -3068,7 +2812,7 @@ def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emita
     
     ## META
     ## -----------------------------------
-    if not exists(Path(path,study+'.meta.json')):
+    if not Path(path,study+'.meta.json').exists():
         # Generate meta class
         sixdb_da = DA(name=study,                                   # Name of the Study
                    path=Path(path),                              # Path to the Study (path/name.meta.json)
@@ -3089,7 +2833,7 @@ def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emita
         sixdb_da.madx_file = Path(path,study+".mask")       # MadX File to build the line from
         sixdb_da.line_file = Path(path,study+".line.json")  # Line File path
 
-        if not exists(sixdb_da.line_file):
+        if not sixdb_da.line_file.exists():
             # Set label to remove:
             label={
                        "%EMIT_BEAM":np.float64(meta.loc['emit','value']),  # [um]
@@ -3114,7 +2858,7 @@ def load_sixdesk_output(path,study,load_line=False): # TODO: Add reference emita
     
     ## SURV
     ## -----------------------------------
-    if not exists(Path(path,study+'.surv.paquet')):
+    if not Path(path,study+'.surv.paquet').exists():
         # Load particle distribution as a polar grid.
         x = surv_amp*np.cos(surv_ang*np.pi/180)
         y = surv_amp*np.sin(surv_ang*np.pi/180)

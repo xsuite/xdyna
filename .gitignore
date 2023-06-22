@@ -128,3 +128,30 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# MacOS
+**/.DS_Store
+
+# FORTRAN
+*.o
+*.obj
+*.mod
+*.a
+
+# VSCode
+.vscode/
+
+# CMake
+CMakeCache*.txt
+CMakeFiles*/
+Makefile*
+cmake_install*.cmake
+
+# SixTrack
+fort.??*
+*.so
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg

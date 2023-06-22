@@ -188,16 +188,6 @@ class ProtectFile:
         self._lock = Path(file.parent, file.name + '.lock').resolve()
         self._temp = Path(tempdir.name, file.name).resolve()
 
-        # Try to make lockfile, wait if unsuccesful
-        while True:
-            try:
-                _print_debug("Init",f"open {self.lockfile}")
-                self._flock = io.open(self.lockfile, 'x')
-                break
-            except (IOError, OSError, FileExistsError):
-                _print_debug("Init", f"waiting {wait}s to create {self.lockfile}")
-                time.sleep(wait)
-
         # We throw potential FileNotFoundError and FileExistsError before
         # creating the backup and temporary files
         self._exists = True if self.file.is_file() else False
@@ -211,6 +201,16 @@ class ProtectFile:
         elif 'x' in mode:
             if self._exists:
                 raise FileExistsError
+
+        # Try to make lockfile, wait if unsuccesful
+        while True:
+            try:
+                _print_debug("Init",f"open {self.lockfile}")
+                self._flock = io.open(self.lockfile, 'x')
+                break
+            except (IOError, OSError, FileExistsError):
+                _print_debug("Init", f"waiting {wait}s to create {self.lockfile}")
+                time.sleep(wait)
 
         # Make a backup if requested
         if self._readonly and not self._backup_if_readonly:
