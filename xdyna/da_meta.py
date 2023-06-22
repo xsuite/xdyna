@@ -119,7 +119,7 @@ class _DAMetaData:
     
     _fields = ['name','path','da_type','da_dim','nemitt_x','nemitt_y','min_turns','max_turns','npart','energy','nseeds',\
                'r_max','pairs_shift','pairs_shift_var','s_start','meta_file','madx_file','line_file','db_extension',\
-               'surv_file','da_file','da_evol_file','submissions']
+               'surv_file','da_file','da_evol_file','submissions','ang_min','ang_max']
     _path_fields = ['path','meta_file','madx_file','line_file','surv_file','da_file','da_evol_file']
     _auto_fields = ['name','path','meta_file','surv_file','da_file','da_evol_file']
     # used to specify the accepted DA types
@@ -136,6 +136,8 @@ class _DAMetaData:
         'max_turns':       None,
         'npart':           None,
         'r_max':           None,
+        'ang_min':         None,
+        'ang_max':         None,
         'energy':          None,
         'nseeds':          0,
         'pairs_shift':     0,
@@ -238,6 +240,10 @@ class _DAMetaData:
         return Path(self.path, self.name + '.da_evol.' + self.db_extension).resolve() if self._use_files else None
 
     @property
+    def da_model_file(self):
+        return Path(self.path, self.name + '.model.' + self.db_extension).resolve() if self._use_files else None
+
+    @property
     def db_extension(self):
         return self._db_extension if self._use_files else None
 
@@ -307,6 +313,30 @@ class _DAMetaData:
         if r_max is not None and r_max <= 0:
             raise ValueError(f"The property r_max has to be larger than zero!")
         self._set_property('r_max', r_max)
+
+    @property
+    def ang_max(self):
+        return self._ang_max
+
+    @ang_max.setter
+    def ang_max(self, ang_max):
+        if not isinstance(ang_max, numbers.Number) and ang_max is not None:
+            raise ValueError(f"The property ang_max should be a number or None!")
+#         if ang_max is not None and ang_max <= 0:
+#             raise ValueError(f"The property ang_max has to be larger than zero!")
+        self._set_property('ang_max', ang_max)
+
+    @property
+    def ang_min(self):
+        return self._ang_min
+
+    @ang_min.setter
+    def ang_min(self, ang_min):
+        if not isinstance(ang_min, numbers.Number) and ang_min is not None:
+            raise ValueError(f"The property ang_min should be a number or None!")
+#         if ang_min is not None and ang_min <= 0:
+#             raise ValueError(f"The property ang_min has to be larger than zero!")
+        self._set_property('ang_min', ang_min)
 
     @property
     def min_turns(self):

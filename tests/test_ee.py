@@ -22,7 +22,8 @@ def test_simple_radial(mode):
     ref_particle = xp.Particles(mass0=xp.ELECTRON_MASS_EV, q0=1, p0c=ENERGY[mode]*10**9, x=0, y=0)
     line.particle_ref = ref_particle
     tracker = xt.Tracker(_context=context, line=line)
-    tracker.configure_radiation(model='mean')
+    line.configure_radiation(model='mean')
+#     tracker.configure_radiation(model='mean')
 
     DA = xd.DA(name=f'fcc_ee_{mode}',
                normalised_emittance=[EMITTANCE[mode]['X']*ref_particle.beta0[0]*ref_particle.gamma0[0],
@@ -45,7 +46,8 @@ def test_simple_grid(mode):
     ref_particle = xp.Particles(mass0=xp.ELECTRON_MASS_EV, q0=1, p0c=ENERGY[mode]*10**9, x=0, y=0)
     line.particle_ref = ref_particle
     tracker = xt.Tracker(_context=context, line=line)
-    tracker.configure_radiation(model='mean')
+    line.configure_radiation(model='mean')
+#     tracker.configure_radiation(model='mean')
 
     DA = xd.DA(name=f'fcc_ee_{mode}',
                normalised_emittance=[EMITTANCE[mode]['X']*ref_particle.beta0[0]*ref_particle.gamma0[0],
