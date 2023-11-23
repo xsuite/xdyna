@@ -1002,14 +1002,18 @@ class DA:
         # Define tracking procedure
 #         def track_per_seed(context, tracker, x_norm, y_norm, px_norm, py_norm, zeta, delta, nemitt_x, nemitt_y, nturn):
         def track_per_seed(context, line, x_norm, y_norm, px_norm, py_norm, zeta, delta, nemitt_x, nemitt_y, nturn):
+            
+            # openmp context and radiation do not play nicely together, so temp. switch to single thread context
+            if line._context.openmp_enabled:
+                line.discard_tracker()
+                line.build_tracker(_context=xo.ContextCpu())
             # Create initial particles
-            part = xp.build_particles(_context=context,
-#                                       tracker=tracker,
-                                      line=line,
+            part = line.build_particles(
                                       x_norm=x_norm, y_norm=y_norm, px_norm=px_norm, py_norm=py_norm, zeta=zeta, delta=delta,
                                       nemitt_x=nemitt_x, nemitt_y=nemitt_y
                                      )
-            # Track
+            if line._context.openmp_enabled:
+                line.build_tracker(_context=context)
 #             tracker.track(particles=part, num_turns=nturn)
             line.track(particles=part, num_turns=nturn)
             context.synchronize()
