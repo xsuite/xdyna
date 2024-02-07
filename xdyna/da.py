@@ -311,7 +311,7 @@ class DA:
         if not file.exists():
             raise ValueError(f"Line file {file.as_posix()} not found!")
 
-        with ProtectFile(file, 'r') as pf:
+        with ProtectFile(file, 'r', max_lock_time=600) as pf:
             line = json.load(pf)
 
         # Fix string keys in JSON: seeds are int
@@ -938,7 +938,8 @@ class DA:
                 else:
                     madin = Path(tmpdir) / self.madx_file.name
                     madout = self.madx_file.parent / (self.madx_file.stem + '.' + str(seed) + '.madx.out')
-                    with ProtectFile(self.madx_file, 'r') as fin:
+                    with ProtectFile(self.madx_file, 'r',
+                                     max_lock_time=600) as fin:
                         data = fin.read()
                         with ProtectFile(madin, 'w') as fout:
                             fout.write(data.replace('%SEEDRAN', str(seed)))
@@ -2229,7 +2230,8 @@ or for multiseeds:
         if self.surv_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
-                    with ProtectFile(self.meta.surv_file, 'rb', wait=_db_access_wait_time) as pf:
+                    with ProtectFile(self.meta.surv_file, 'rb', wait=_db_access_wait_time,
+                                     max_lock_time=1800) as pf:
                         self._surv = pd.read_parquet(pf, engine="pyarrow")
                 else:
                     self._surv = pd.read_parquet(pf, engine="pyarrow")
@@ -2258,7 +2260,8 @@ or for multiseeds:
         if self.da_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
-                    with ProtectFile(self.meta.da_file, 'rb', wait=_db_access_wait_time) as pf:
+                    with ProtectFile(self.meta.da_file, 'rb', wait=_db_access_wait_time,
+                                     max_lock_time=1800) as pf:
                         self._da = pd.read_parquet(pf, engine="pyarrow")
                 else:
                     self._da = pd.read_parquet(pf, engine="pyarrow")
@@ -2287,7 +2290,8 @@ or for multiseeds:
         if self.da_evol_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
-                    with ProtectFile(self.meta.da_evol_file, 'rb', wait=_db_access_wait_time) as pf:
+                    with ProtectFile(self.meta.da_evol_file, 'rb', wait=_db_access_wait_time,
+                                     max_lock_time=1800) as pf:
                         self._da_evol = pd.read_parquet(pf, engine="pyarrow")
                 else:
                     self._da_evol = pd.read_parquet(pf, engine="pyarrow")
@@ -2316,7 +2320,8 @@ or for multiseeds:
         if self.da_model_exists():
             if self.meta.db_extension=='parquet':
                 if pf is None:
-                    with ProtectFile(self.meta.da_model_file, 'rb', wait=_db_access_wait_time) as pf:
+                    with ProtectFile(self.meta.da_model_file, 'rb', wait=_db_access_wait_time,
+                                     max_lock_time=1800) as pf:
                         self._da_model = pd.read_parquet(pf, engine="pyarrow")
                 else:
                     self._da_model = pd.read_parquet(pf, engine="pyarrow")

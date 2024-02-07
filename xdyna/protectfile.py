@@ -162,8 +162,8 @@ class ProtectFile:
             Whether or not to verify by hash that the move of the temporary file to
             the original file succeeded.
         max_lock_time : float, default None
-            If provided, it will write the maximum runtime inside the lockfile.
-            This is to avoided crashed accesses locking the file forever.
+            If provided, it will write the maximum runtime in seconds inside the
+            lockfile. This is to avoided crashed accesses locking the file forever.
 
         Additionally, the following parameters are inherited from open():
             'file', 'mode', 'buffering', 'encoding', 'errors', 'newline', 'closefd', 'opener'
@@ -256,7 +256,7 @@ class ProtectFile:
         # Store lock information
         if max_lock_time is not None:
             json.dump({
-                'free_after': time.time() + 2*max_lock_time
+                'free_after': time.time() + 1.2*max_lock_time
             }, self._flock)
             self._flock.close()
 
