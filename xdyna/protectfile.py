@@ -13,6 +13,7 @@ import random
 import shutil
 import tempfile
 import time
+import json
 
 tempdir = tempfile.TemporaryDirectory()
 protected_open = {}
@@ -145,9 +146,10 @@ class ProtectFile:
 
         Parameters
         ---------
-        wait : int, default 1
-            When a file is locked, the time to wait before trying to acess it again.
-        backup_during_lock : bool, default True
+        wait : float, default 1
+            When a file is locked, the time to wait in seconds before trying to
+            access it again.
+        backup_during_lock : bool, default False
             Whether or not to use a temporary backup file, to restore in case of
             failure.
         backup : bool, default False
@@ -159,6 +161,9 @@ class ProtectFile:
         check_hash : bool, default True
             Whether or not to verify by hash that the move of the temporary file to
             the original file succeeded.
+        max_lock_time : float, default None
+            If provided, it will write the maximum runtime inside the lockfile.
+            This is to avoided crashed accesses locking the file forever.
 
         Additionally, the following parameters are inherited from open():
             'file', 'mode', 'buffering', 'encoding', 'errors', 'newline', 'closefd', 'opener'
@@ -202,6 +207,14 @@ class ProtectFile:
             if self._exists:
                 raise FileExistsError
 
+        
+        # Provide an expected running time (to free a file in case of crash)
+        max_lock_time = arg.pop('max_lock_time', None)
+        if max_lock_time is not None and self._readonly == False \
+        and self._file.suffix != '.lock':
+            print("Warning: Using `max_lock_time` for non read-only "
+                + "files is dangerous! Are you sure this is what you want?")
+
         # Try to make lockfile, wait if unsuccesful
         while True:
             try:
@@ -211,6 +224,41 @@ class ProtectFile:
             except (IOError, OSError, FileExistsError):
                 _print_debug("Init", f"waiting {wait}s to create {self.lockfile}")
                 time.sleep(wait)
+                if max_lock_time is not None:
+                    # Check if the original process that locked the file
+                    # might have crashed. If yes, this process can take over.
+                    # We are only allowed to do this for 10 iterations
+                    iteration = 0
+                    for suf in self.lockfile.suffixes:
+                        if suf == '.lock':
+                            iteration += 1
+                        else:
+                            iteration = 0
+                    if iteration < 10:
+                        # Try to open the lock
+                        with ProtectFile(self.lockfile, 'r+', wait=0.1, \
+                                         max_lock_time=10) as pf:
+                            info = json.load(pf)
+                            if 'free_after' in info and info['free_after'] < time.time():
+                                # We free the original process
+                                # Note that we have to udpate the info in the lockfile
+                                # before freeing the lockfile!
+                                json.dump({
+                                    'free_after': time.time() + 2*max_lock_time
+                                }, pf)
+                                # We still have to provide the file pointer as the
+                                # original pointer failed with FileExistsError
+                                self._flock = io.open(self.lockfile, 'r+')
+                                break
+                    else:
+                        raise RunTimeError("Too many lockfiles!")
+
+        # Store lock information
+        if max_lock_time is not None:
+            json.dump({
+                'free_after': time.time() + 2*max_lock_time
+            }, self._flock)
+            self._flock.close()
 
         # Make a backup if requested
         if self._readonly and not self._backup_if_readonly:
