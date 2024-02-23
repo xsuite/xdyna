@@ -9,5 +9,4 @@ from .plot import plot_particles, plot_da_border, plot_da_border, plot_davsturns
 
 from .da import DA
 from .da_meta import regenerate_meta_file
-from .protectfile import ProtectFile, get_hash
 

@@ -19,7 +19,7 @@ import xobjects as xo
 import xtrack as xt
 import xpart as xp
 
-from .protectfile import ProtectFile
+from xaux import ProtectFile
 from .da_meta import _DAMetaData
 from .geometry import _bleed, distance_to_polygon_2D
 

@@ -2,7 +2,7 @@ import numbers
 from pathlib import Path
 import json
 
-from .protectfile import ProtectFile
+from xaux import ProtectFile
 
 
 # The DAMeta class stores the info of the DA

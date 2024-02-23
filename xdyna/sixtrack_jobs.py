@@ -13,7 +13,7 @@ import sixtracktools as st
 
 from da_meta import _DAMetaData
 from da import descend, _calculate_radial_evo
-from protectfile import ProtectFile
+from xaux import ProtectFile
 
 
 def _get_raw_da_sixdesk(data):
